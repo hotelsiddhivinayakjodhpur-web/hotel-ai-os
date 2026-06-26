@@ -1,0 +1,229 @@
+// Hotel Siddhi Vinayak AI OS — data model.
+//
+// Covers: Stayflexi audit/cache (ApiCallLog, WebhookEvent, BookingCache),
+// the autonomous agent runtime (Agent, AgentTask, AgentLog, AgentMemory),
+// and the CEO/Analytics layer (MetricSnapshot, Alert, Briefing).
+//
+// Multi-hotel ready: every operational row carries `hotelId`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Stayflexi integration ────────────────────────────────────────────────────
+
+/// Audit trail of every outbound Stayflexi API call (no secrets/PII stored).
+model ApiCallLog {
+  id         String   @id @default(cuid())
+  api        String // "booking-engine" | "channel-manager" | "payments"
+  endpoint   String
+  method     String
+  hotelId    String?
+  status     Int?
+  durationMs Int?
+  ok         Boolean  @default(false)
+  attempt    Int      @default(0)
+  errorName  String?
+  createdAt  DateTime @default(now())
+
+  @@index([api, createdAt])
+  @@index([hotelId, createdAt])
+}
+
+/// Inbound Stayflexi booking webhooks. Stayflexi delivers at-least-once with NO
+/// signature, so we dedupe on (bookingId, bookingStatus) and keep the raw body.
+model WebhookEvent {
+  id            String   @id @default(cuid())
+  bookingId     String
+  bookingStatus String // CREATED | MODIFIED | CANCELLED
+  hotelId       String?
+  payload       Json
+  processed      Boolean  @default(false)
+  processedAt    DateTime?
+  receivedAt     DateTime @default(now())
+
+  @@unique([bookingId, bookingStatus], name: "booking_status_dedupe")
+  @@index([hotelId, receivedAt])
+}
+
+/// Local cache/projection of Stayflexi bookings (from webhooks + reconciliation
+/// polling of bookinglist/bookingdetail). Source of truth stays Stayflexi.
+model BookingCache {
+  id               String    @id @default(cuid())
+  bookingId        String    @unique
+  hotelId          String
+  status           String // CONFIRMED | CANCELLED | MODIFIED ...
+  channelBookingId String? // OTA id, when sourced via channel manager
+  source           String? // STAYFLEXI_OD | OTA name ...
+  checkin          DateTime?
+  checkout         DateTime?
+  roomTypeId       String?
+  ratePlanId       String?
+  sellRate         Float?
+  currency         String?   @default("INR")
+  guestName        String?
+  raw              Json?
+  lastSyncedAt     DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([hotelId, checkin])
+  @@index([hotelId, status])
+}
+
+// ── Autonomous agent runtime ─────────────────────────────────────────────────
+
+enum AgentKind {
+  CEO
+  WEBSITE
+  SEO
+  ANALYTICS
+}
+
+enum AgentStatus {
+  IDLE
+  RUNNING
+  BUSY
+  FAILED
+  PAUSED
+}
+
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+/// One of the four Phase-1 departments, modelled as an autonomous agent.
+model Agent {
+  id             String      @id @default(cuid())
+  kind           AgentKind   @unique
+  name           String
+  mission        String
+  status         AgentStatus @default(IDLE)
+  health         Int         @default(100) // 0-100
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  currentTaskId  String?
+  enabled        Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  tasks   AgentTask[]
+  logs    AgentLog[]
+  memory  AgentMemory[]
+}
+
+/// Work item in an agent's queue / execution history.
+model AgentTask {
+  id          String     @id @default(cuid())
+  agentId     String
+  agent       Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  title       String
+  payload     Json?
+  status      TaskStatus @default(QUEUED)
+  priority    Int        @default(0)
+  result      Json?
+  error       String?
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([agentId, status])
+  @@index([status, scheduledAt])
+}
+
+/// Append-only agent activity log (shown in the AI Operations dashboard).
+model AgentLog {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  level     String   @default("info") // debug|info|warn|error
+  message   String
+  meta      Json?
+  taskId    String?
+  createdAt DateTime @default(now())
+
+  @@index([agentId, createdAt])
+}
+
+/// Durable key/value memory per agent (facts, last-seen cursors, learned state).
+model AgentMemory {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, key])
+}
+
+// ── CEO / analytics layer ────────────────────────────────────────────────────
+
+/// Daily snapshot of the headline KPIs the CEO dashboard renders.
+model MetricSnapshot {
+  id              String   @id @default(cuid())
+  hotelId         String
+  date            DateTime // the business date this snapshot describes
+  occupancy       Float? // 0-1
+  adr             Float? // average daily rate
+  revpar          Float? // revenue per available room
+  roomsSold       Int?
+  roomsAvailable  Int?
+  directRevenue   Float?
+  otaRevenue      Float?
+  cancellations   Int?
+  bookingPace     Float? // bookings vs same-time-last-period
+  healthScore     Int? // 0-100 composite
+  source          String   @default("stayflexi")
+  createdAt       DateTime @default(now())
+
+  @@unique([hotelId, date, source])
+  @@index([hotelId, date])
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// Critical alerts surfaced by the CEO/agents (revenue drop, site down, etc.).
+model Alert {
+  id           String        @id @default(cuid())
+  hotelId      String?
+  severity     AlertSeverity @default(INFO)
+  source       String // which agent/department raised it
+  title        String
+  detail       String?
+  acknowledged Boolean       @default(false)
+  resolvedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([hotelId, acknowledged, createdAt])
+}
+
+/// Daily/weekly/monthly AI briefings with recommendations.
+model Briefing {
+  id        String   @id @default(cuid())
+  hotelId   String
+  period    String // DAILY | WEEKLY | MONTHLY
+  date      DateTime
+  summary   String
+  metrics   Json?
+  actions   Json? // recommended actions
+  createdAt DateTime @default(now())
+
+  @@unique([hotelId, period, date])
+  @@index([hotelId, date])
+}

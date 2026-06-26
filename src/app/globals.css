@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0b0f19;
+  color: #e6eaf2;
+}
+
+/* Thin custom scrollbar to match the control-room aesthetic. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e2638 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #1e2638;
+  border-radius: 4px;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-panel p-5;
+  }
+  .stat-label {
+    @apply text-xs font-medium uppercase tracking-wider text-muted;
+  }
+  .stat-value {
+    @apply mt-1 text-2xl font-semibold text-text;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}
