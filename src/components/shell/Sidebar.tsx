@@ -47,7 +47,11 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-border p-4 text-[11px] text-muted">
-        Phase 1 · CEO · Website · SEO · Analytics
+        <div>Phase 1 · CEO · Website · SEO · Analytics</div>
+        <div className="mt-2 flex gap-3">
+          <Link href="/privacy" className="hover:text-text">Privacy</Link>
+          <Link href="/terms" className="hover:text-text">Terms</Link>
+        </div>
       </div>
     </aside>
   );
