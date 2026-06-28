@@ -2,18 +2,23 @@ import { env } from "@/lib/env";
 import { getAnalyticsIntelligence } from "./analytics-intelligence.service";
 import { getSeoIntelligence } from "./seo-intelligence.service";
 import { checkWebsite } from "./website.service";
+import { getHotelDataProvider } from "./hotel-data.provider";
+import { generateBriefing } from "./briefing.service";
+import type { KpiSet } from "./metrics.service";
 import { metricRepository } from "@/server/repositories/metric.repository";
 import { agentRepository } from "@/server/repositories/agent.repository";
 import { safeDb } from "./db-guard";
 
 /**
- * Executive (CEO) intelligence — fuses Analytics, SEO and Website into a single
- * Command Center view: a digital performance score, an executive summary,
- * daily/weekly/monthly briefings, prioritised recommendations (the action
- * center), open alerts and the live agent task queue.
+ * Executive (CEO) intelligence — fuses hotel revenue (via the data provider),
+ * Analytics, SEO and Website into a single Command Center: a digital performance
+ * score, an executive summary, briefings, prioritised recommendations, open
+ * alerts and the live agent task queue.
  *
- * Hotel revenue KPIs are intentionally NOT synthesised here — they remain in the
- * "Waiting for Stayflexi" state until those credentials exist.
+ * Hotel revenue KPIs come from the active HotelDataProvider (Gmail-parsed
+ * Stayflexi reports today; the Stayflexi API later — the AI layer is unchanged).
+ * When no report has been ingested yet, the revenue section shows a waiting
+ * state — never fabricated numbers.
  */
 export interface ExecRecommendation {
   priority: "high" | "medium" | "low";
@@ -35,6 +40,10 @@ export interface ExecKpiTrend {
 
 export interface ExecutiveView {
   stayflexiReady: boolean;
+  /** True once any hotel report (Gmail or API) has been ingested. */
+  hotelDataAvailable: boolean;
+  hotelSource: string | null;
+  hotelKpis: KpiSet | null;
   performanceScore: number | null;
   scoreParts: { label: string; value: number | null; weight: number }[];
   summary: string;
@@ -58,14 +67,17 @@ export async function getExecutiveView(): Promise<ExecutiveView> {
   const hotelId = env.STAYFLEXI_HOTEL_ID ?? "unknown";
   const stayflexiReady = Boolean(env.STAYFLEXI_BE_API_KEY && env.STAYFLEXI_GROUP_ID);
 
-  const [analytics, seo, uptime, alerts, agents] = await Promise.all([
+  const provider = getHotelDataProvider();
+  const [analytics, seo, uptime, alerts, agents, hotelKpis] = await Promise.all([
     getAnalyticsIntelligence(),
     getSeoIntelligence(),
     checkWebsite(), // fast uptime probe; full audit is the Website AI page's job
     safeDb(() => metricRepository.openAlerts(hotelId, 10), []),
     safeDb(() => agentRepository.list(), []),
+    provider.getDailyKpis(),
   ]);
 
+  const hotelDataAvailable = hotelKpis !== null;
   const o = analytics.report.overview;
 
   // Website health: read the score the Website agent last computed (DB memory),
@@ -121,21 +133,36 @@ export async function getExecutiveView(): Promise<ExecutiveView> {
   if (o && o.bounceRate > 0.6) {
     recommendations.push({ priority: "low", area: "Analytics", title: `Bounce rate is ${Math.round(o.bounceRate * 100)}%`, detail: "Review landing-page relevance and load speed." });
   }
-  if (!stayflexiReady) {
-    recommendations.push({ priority: "high", area: "Revenue", title: "Connect Stayflexi for revenue intelligence", detail: "Add Booking Engine + Channel Manager keys to unlock occupancy, ADR and RevPAR." });
+  // Revenue recommendations come from the hotel data (Gmail/API) when present,
+  // via the SAME briefing engine the metrics layer uses.
+  if (hotelKpis) {
+    const hb = generateBriefing(hotelKpis, "DAILY");
+    for (const r of hb.recommendations) {
+      recommendations.push({ priority: r.priority, area: "Revenue", title: r.title, detail: r.rationale });
+    }
+  } else {
+    recommendations.push({
+      priority: "high",
+      area: "Revenue",
+      title: "No hotel report ingested yet",
+      detail: "Forward/ingest a Stayflexi Night Audit email to populate occupancy, ADR and RevPAR.",
+    });
   }
   recommendations.sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
 
   // ── Briefings ──
-  const briefings = buildBriefings(analytics, seo);
+  const briefings = buildBriefings(analytics, seo, hotelKpis);
 
   // ── Summary ──
+  const revenueLine = hotelKpis
+    ? `Hotel: ${pct(hotelKpis.occupancy)} occupancy, ADR ${money(hotelKpis.adr)}, RevPAR ${money(hotelKpis.revpar)} (${hotelKpis.date}, via ${provider.sourceLabel}). `
+    : "Hotel revenue KPIs await the first ingested Stayflexi report. ";
   const summary =
-    `Digital performance score ${performanceScore ?? "—"}/100. ` +
-    `${o ? `${o.sessions.toLocaleString()} sessions and ` : ""}` +
-    `${seo.report.totals ? `${seo.report.totals.clicks} search clicks ` : ""}in the last 28 days. ` +
-    `Website health ${websiteHealth}/100. ` +
-    (stayflexiReady ? "" : "Hotel revenue KPIs await Stayflexi credentials.");
+    revenueLine +
+    `Digital score ${performanceScore ?? "—"}/100 — ` +
+    `${o ? `${o.sessions.toLocaleString()} sessions, ` : ""}` +
+    `${seo.report.totals ? `${seo.report.totals.clicks} search clicks ` : ""}(28d), ` +
+    `website health ${websiteHealth}/100.`;
 
   // ── Alerts (prioritised) ──
   alerts.sort((a, b) => (ALERT_RANK[a.severity] ?? 9) - (ALERT_RANK[b.severity] ?? 9));
@@ -151,6 +178,9 @@ export async function getExecutiveView(): Promise<ExecutiveView> {
 
   return {
     stayflexiReady,
+    hotelDataAvailable,
+    hotelSource: hotelDataAvailable ? provider.sourceLabel : null,
+    hotelKpis,
     performanceScore,
     scoreParts,
     summary,
@@ -181,18 +211,31 @@ function quickWebsiteHealth(uptime: Awaited<ReturnType<typeof checkWebsite>>): n
   return Math.round(70 + (present / total) * 30);
 }
 
+function pct(n: number | null): string {
+  return n === null ? "—" : `${Math.round(n * 100)}%`;
+}
+function money(n: number | null): string {
+  return n === null ? "—" : `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
+
 function buildBriefings(
   analytics: Awaited<ReturnType<typeof getAnalyticsIntelligence>>,
   seo: Awaited<ReturnType<typeof getSeoIntelligence>>,
+  hotelKpis: KpiSet | null,
 ): ExecBriefing[] {
   const o = analytics.report.overview;
   const weekly = analytics.weekly;
   const monthly = analytics.monthly;
 
+  const hotelLine = hotelKpis
+    ? `Hotel ${pct(hotelKpis.occupancy)} occ · ADR ${money(hotelKpis.adr)} · RevPAR ${money(hotelKpis.revpar)} · revenue ${money(hotelKpis.totalRevenue)} (${hotelKpis.date}). `
+    : "";
   const daily: ExecBriefing = {
     period: "DAILY",
-    headline: o ? `${o.sessions.toLocaleString()} sessions · ${seo.report.totals?.clicks ?? 0} search clicks (28d)` : "Awaiting GA4 data",
-    body: analytics.executiveSummary,
+    headline: hotelKpis
+      ? `${pct(hotelKpis.occupancy)} occupancy · ADR ${money(hotelKpis.adr)} · ${o?.sessions.toLocaleString() ?? 0} sessions`
+      : o ? `${o.sessions.toLocaleString()} sessions · ${seo.report.totals?.clicks ?? 0} search clicks (28d)` : "Awaiting data",
+    body: hotelLine + analytics.executiveSummary,
   };
 
   const lastWk = weekly.at(-1);

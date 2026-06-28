@@ -64,6 +64,15 @@ const schema = z.object({
   // Optional PageSpeed Insights API key (raises the CWV quota; works without it).
   PAGESPEED_API_KEY: optionalStr,
 
+  // Gmail Intelligence — optional app-side Gmail reader (OAuth installed-app).
+  // When unset, the app's Gmail client stays dormant; n8n drives ingestion via
+  // /api/ingest/stayflexi-report instead.
+  GMAIL_CLIENT_ID: optionalStr,
+  GMAIL_CLIENT_SECRET: optionalStr,
+  GMAIL_REFRESH_TOKEN: optionalStr,
+  // Sender to trust for reports (defaults to Stayflexi's admin address).
+  GMAIL_REPORT_SENDER: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("admin@stayflexi.com")),
+
   // App
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

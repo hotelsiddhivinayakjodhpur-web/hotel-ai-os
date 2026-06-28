@@ -227,3 +227,159 @@ model Briefing {
   @@unique([hotelId, period, date])
   @@index([hotelId, date])
 }
+
+// ── Gmail Intelligence layer (temporary production source until Stayflexi API) ──
+//
+// Stayflexi emails daily reports (Night Audit + Daily Intelligence) to the
+// hotel's inbox. The pipeline parses them into these tables, which the data
+// provider reads to feed the AI layer. When the Stayflexi API arrives, only the
+// provider's source changes — these tables and the AI layer stay the same.
+
+/// Parsed Night Audit report (one per hotel per business date).
+model NightAuditReport {
+  id             String   @id @default(cuid())
+  hotelId        String
+  businessDate   DateTime // the date the report describes
+  // headline KPIs (today)
+  roomsSold      Int?
+  roomsAvailable Int?
+  occupancy      Float? // 0-1
+  adr            Float?
+  revpar         Float?
+  roomRevenue    Float?
+  posRevenue     Float?
+  servicesRevenue Float?
+  totalPayments  Float?
+  arrivals       Int?
+  departures     Int?
+  // structured detail kept verbatim for transparency / re-parsing
+  payments       Json? // payment-method breakdown
+  monthToDate    Json? // month's performance block
+  forecast       Json?
+  raw            Json? // full parsed object
+  currency       String   @default("INR")
+  source         String   @default("gmail") // gmail | stayflexi-api
+  messageId      String? // Gmail message id (provenance)
+  reportDate     DateTime? // when the email was sent
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  revenueSources RevenueSource[]
+  roomRevenues   RoomRevenue[]
+
+  @@unique([hotelId, businessDate])
+  @@index([hotelId, businessDate])
+}
+
+/// Parsed Daily Intelligence report (occupancy/revenue/pickup/market).
+model DailyIntelligenceReport {
+  id             String   @id @default(cuid())
+  hotelId        String
+  businessDate   DateTime
+  occupancy      Float?
+  revenue        Float?
+  pickup         Float? // net pickup (rooms or revenue per report)
+  bookingWindow  Float? // avg lead time (days)
+  marketIntel    Json?
+  raw            Json?
+  source         String   @default("gmail")
+  messageId      String?
+  reportDate     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  pickupSources PickupSource[]
+  forecasts     DailyForecast[]
+
+  @@unique([hotelId, businessDate])
+  @@index([hotelId, businessDate])
+}
+
+/// Revenue broken down by booking source (OTA, direct, walk-in, …).
+model RevenueSource {
+  id           String   @id @default(cuid())
+  hotelId      String
+  businessDate DateTime
+  source       String // AGODA | BOOKING.COM | WALK-IN | STAYFLEXI_OD | ...
+  amount       Float
+  scope        String   @default("today") // today | mtd
+  nightAudit   NightAuditReport? @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
+  nightAuditId String?
+  createdAt    DateTime @default(now())
+
+  @@index([hotelId, businessDate])
+}
+
+/// Revenue + rooms sold broken down by room type.
+model RoomRevenue {
+  id           String   @id @default(cuid())
+  hotelId      String
+  businessDate DateTime
+  roomType     String
+  revenue      Float?
+  roomsSold    Int?
+  nightAudit   NightAuditReport? @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
+  nightAuditId String?
+  createdAt    DateTime @default(now())
+
+  @@index([hotelId, businessDate])
+}
+
+/// Pickup (new bookings) by source.
+model PickupSource {
+  id           String   @id @default(cuid())
+  hotelId      String
+  businessDate DateTime
+  source       String
+  rooms        Int?
+  revenue      Float?
+  dailyReport  DailyIntelligenceReport? @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  dailyReportId String?
+  createdAt    DateTime @default(now())
+
+  @@index([hotelId, businessDate])
+}
+
+/// Forward-looking occupancy/revenue forecast rows.
+model DailyForecast {
+  id            String   @id @default(cuid())
+  hotelId       String
+  businessDate  DateTime // date the forecast was generated
+  forecastDate  DateTime // date being forecast
+  occupancy     Float?
+  revenue       Float?
+  roomsForecast Int?
+  dailyReport   DailyIntelligenceReport? @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  dailyReportId String?
+  createdAt     DateTime @default(now())
+
+  @@index([hotelId, forecastDate])
+}
+
+enum EmailProcessingStatus {
+  SUCCESS
+  PARTIAL
+  DUPLICATE
+  FAILED
+}
+
+/// Audit log of every email/report processed (idempotency + observability).
+model EmailProcessingLog {
+  id            String                @id @default(cuid())
+  hotelId       String?
+  messageId     String? // Gmail message id
+  reportType    String // NIGHT_AUDIT | DAILY_INTELLIGENCE | UNKNOWN
+  status        EmailProcessingStatus
+  source        String                @default("gmail")
+  subject       String?
+  fromAddress   String?
+  attachments   Json? // filenames seen
+  fieldsParsed  Int                   @default(0)
+  error         String?
+  attempt       Int                   @default(1)
+  createdAt     DateTime              @default(now())
+
+  @@unique([messageId, reportType])
+  @@index([hotelId, createdAt])
+  @@index([status, createdAt])
+}

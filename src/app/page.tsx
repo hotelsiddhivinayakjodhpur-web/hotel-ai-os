@@ -2,7 +2,7 @@ import { getExecutiveView } from "@/server/services/executive.service";
 import { Card, EmptyState, NotConnected, PageHeader, Pill, ScoreBadge, Section, StatCard } from "@/components/ui/primitives";
 import { LineChart, ScoreRing, ChartCard, type Point } from "@/components/charts/Charts";
 import { BriefingTabs } from "@/components/ceo/BriefingTabs";
-import { fmtInt, shortDate } from "@/lib/format";
+import { fmtInt, fmtMoney, fmtPct, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -54,16 +54,22 @@ export default async function CeoDashboard() {
         </Card>
       </div>
 
-      {/* Hotel revenue (Stayflexi) */}
-      <Section title="Hotel Revenue (Stayflexi)">
-        {view.stayflexiReady ? (
+      {/* Hotel revenue — from the active data provider (Gmail now, API later) */}
+      <Section
+        title="Hotel Revenue"
+        action={view.hotelKpis ? <Pill tone="ok">{view.hotelSource}</Pill> : <Pill tone="warn">No report yet</Pill>}
+      >
+        {view.hotelKpis ? (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard label="Status" value="Connected" tone="ok" />
+            <StatCard label="Occupancy" value={fmtPct(view.hotelKpis.occupancy)} hint={`${fmtInt(view.hotelKpis.roomsSold)} of ${fmtInt(view.hotelKpis.roomsAvailable)} rooms · ${view.hotelKpis.date}`} />
+            <StatCard label="ADR" value={fmtMoney(view.hotelKpis.adr)} hint="Average daily rate" />
+            <StatCard label="RevPAR" value={fmtMoney(view.hotelKpis.revpar)} hint="Revenue per available room" />
+            <StatCard label="Room Revenue" value={fmtMoney(view.hotelKpis.totalRevenue)} tone="ok" hint={view.hotelKpis.bookingPace !== null ? `Booking pace ${view.hotelKpis.bookingPace}×` : "Today"} />
           </div>
         ) : (
           <NotConnected
-            title="Waiting for Stayflexi Production Credentials"
-            body="Occupancy, ADR, RevPAR and revenue populate automatically once the Stayflexi Booking Engine + Channel Manager keys are added. No placeholder numbers are shown."
+            title="Waiting for the first Stayflexi report"
+            body="Occupancy, ADR, RevPAR and revenue populate automatically from the daily Stayflexi Night Audit email (via Gmail) — or the Stayflexi API once credentials arrive. No placeholder numbers are shown."
           />
         )}
       </Section>

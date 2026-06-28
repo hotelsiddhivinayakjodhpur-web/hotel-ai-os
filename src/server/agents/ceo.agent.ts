@@ -1,12 +1,14 @@
 import { metricRepository } from "@/server/repositories/metric.repository";
 import { generateBriefing } from "@/server/services/briefing.service";
-import { snapshotDailyKpis } from "@/server/services/metrics.service";
+import { getHotelDataProvider } from "@/server/services/hotel-data.provider";
+import type { KpiSet } from "@/server/services/metrics.service";
 import type { AgentDefinition } from "./types";
 
 /**
- * CEO AI — the revenue brain. Each run it computes today's KPIs from Stayflexi
- * bookings, persists a snapshot, writes a fresh briefing, and raises alerts when
- * thresholds are crossed.
+ * CEO AI — the revenue brain. Each run it reads today's KPIs from the active
+ * hotel data provider (Gmail-parsed Stayflexi reports now; the Stayflexi API
+ * later — unchanged logic), persists a snapshot + briefing, and raises alerts
+ * when thresholds are crossed.
  */
 export const ceoAgent: AgentDefinition = {
   kind: "CEO",
@@ -20,18 +22,29 @@ export const ceoAgent: AgentDefinition = {
     "Produce daily/weekly/monthly briefings with recommendations",
     "Raise critical alerts on revenue or demand anomalies",
   ],
-  tools: ["metrics.service", "briefing.service", "metric.repository", "Stayflexi BE/CM"],
+  tools: ["hotel-data.provider", "briefing.service", "metric.repository", "Gmail / Stayflexi"],
   cadenceMinutes: 60,
 
   async execute(ctx) {
     const today = new Date();
 
-    // roomsAvailable would come from the Stayflexi calendar; until live we read
-    // a remembered value (set by the Analytics agent / config) if present.
-    const roomsAvailable = (await ctx.recall<number>("roomsAvailable")) ?? undefined;
-
-    const kpis = await snapshotDailyKpis(ctx.hotelId, today, roomsAvailable);
+    // Read KPIs from the active provider (Gmail-parsed reports today).
+    const kpis: KpiSet = (await getHotelDataProvider().getDailyKpis()) ?? emptyKpis(today);
     const briefing = generateBriefing(kpis, "DAILY");
+
+    // Persist a metric snapshot for history (keyed on the report's business date).
+    await metricRepository.upsertSnapshot(ctx.hotelId, startOfDay(new Date(kpis.date)), {
+      occupancy: kpis.occupancy,
+      adr: kpis.adr,
+      revpar: kpis.revpar,
+      roomsSold: kpis.roomsSold,
+      roomsAvailable: kpis.roomsAvailable,
+      directRevenue: kpis.directRevenue,
+      otaRevenue: kpis.otaRevenue,
+      cancellations: kpis.cancellations,
+      bookingPace: kpis.bookingPace,
+      healthScore: kpis.healthScore,
+    });
 
     await metricRepository.upsertBriefing(ctx.hotelId, "DAILY", startOfDay(today), {
       summary: `${briefing.headline} — ${briefing.summary}`,
@@ -78,4 +91,14 @@ export const ceoAgent: AgentDefinition = {
 
 function startOfDay(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+/** Empty KPI set when no report has been ingested yet (no fabricated numbers). */
+function emptyKpis(today: Date): KpiSet {
+  return {
+    date: today.toISOString().slice(0, 10),
+    occupancy: null, adr: null, revpar: null, roomsSold: null, roomsAvailable: null,
+    directRevenue: 0, otaRevenue: 0, totalRevenue: 0, cancellations: 0,
+    bookingPace: null, healthScore: null, hasData: false,
+  };
 }

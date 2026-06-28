@@ -1,18 +1,21 @@
 import { getAnalyticsIntelligence } from "@/server/services/analytics-intelligence.service";
 import { getSeoReport } from "@/server/services/seo.service";
 import { checkWebsite } from "@/server/services/website.service";
-import { env } from "@/lib/env";
+import { getHotelDataProvider } from "@/server/services/hotel-data.provider";
 import { Card, EmptyState, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { BarChart, BarList, LineChart, ChartCard, type Point } from "@/components/charts/Charts";
-import { fmtInt, fmtPct, fmtPctValue, fmtDuration, ga4DateToIso, shortDate, stripOrigin } from "@/lib/format";
+import { fmtInt, fmtMoney, fmtPct, fmtPctValue, fmtDuration, ga4DateToIso, shortDate, stripOrigin } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage() {
-  const [intel, seo, website] = await Promise.all([
+  const provider = getHotelDataProvider();
+  const [intel, seo, website, hotelHistory, revenueSources] = await Promise.all([
     getAnalyticsIntelligence(),
     getSeoReport(),
     checkWebsite(),
+    provider.getKpiHistory(30),
+    provider.getRevenueSources(),
   ]);
   const { report, weekly, monthly, forecast, executiveSummary } = intel;
   const o = report.overview;
@@ -20,6 +23,11 @@ export default async function AnalyticsPage() {
   const sessionsSeries: Point[] = report.timeseries.map((t) => ({ label: shortDate(ga4DateToIso(t.date)), value: t.sessions }));
   const usersSeries: Point[] = report.timeseries.map((t) => ({ label: shortDate(ga4DateToIso(t.date)), value: t.users }));
   const weeklyBars: Point[] = weekly.map((w) => ({ label: w.label.replace("Wk ", ""), value: w.sessions }));
+
+  // Hotel performance trends from parsed Stayflexi reports (Gmail).
+  const occTrend: Point[] = hotelHistory.filter((k) => k.occupancy !== null).map((k) => ({ label: shortDate(k.date), value: Math.round((k.occupancy ?? 0) * 100) }));
+  const revTrend: Point[] = hotelHistory.filter((k) => k.totalRevenue > 0).map((k) => ({ label: shortDate(k.date), value: k.totalRevenue }));
+  const latestHotel = hotelHistory.at(-1) ?? null;
 
   return (
     <div>
@@ -30,8 +38,35 @@ export default async function AnalyticsPage() {
         <SourceCard name="GA4" connected={report.configured} note={report.note} />
         <SourceCard name="Search Console" connected={seo.configured} note={seo.configured ? `${seo.totals?.clicks ?? 0} clicks` : seo.note} />
         <SourceCard name="Website" connected={website.up} note={website.up ? `${website.latencyMs}ms` : website.error} />
-        <SourceCard name="Stayflexi" connected={Boolean(env.STAYFLEXI_BE_API_KEY)} note="Awaiting production credentials" />
+        <SourceCard name="Hotel (Stayflexi)" connected={latestHotel !== null} note={latestHotel ? `${provider.sourceLabel}` : "Awaiting first report"} />
       </div>
+
+      {/* Hotel performance — parsed Stayflexi reports via Gmail */}
+      <Section title="Hotel Performance (Stayflexi via Gmail)">
+        {!latestHotel ? (
+          <EmptyState title="No hotel report ingested yet" body="Daily occupancy, ADR, RevPAR, revenue and source analysis appear here once a Stayflexi Night Audit email is ingested." />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <StatCard label="Occupancy" value={fmtPct(latestHotel.occupancy)} hint={latestHotel.date} />
+              <StatCard label="ADR" value={fmtMoney(latestHotel.adr)} />
+              <StatCard label="RevPAR" value={fmtMoney(latestHotel.revpar)} />
+              <StatCard label="Room Revenue" value={fmtMoney(latestHotel.totalRevenue)} tone="ok" />
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <ChartCard title="Occupancy Trend (%)"><LineChart series={occTrend} label="Occupancy" valueFormat={(n) => `${Math.round(n)}%`} /></ChartCard>
+              <ChartCard title="Room Revenue Trend"><LineChart series={revTrend} label="Revenue" valueFormat={(n) => fmtMoney(n)} /></ChartCard>
+            </div>
+            {revenueSources.length > 0 && (
+              <div className="mt-4">
+                <ChartCard title="Revenue by Source">
+                  <BarList data={revenueSources.map((s) => ({ label: s.source, value: s.amount }))} valueFormat={(n) => fmtMoney(n)} />
+                </ChartCard>
+              </div>
+            )}
+          </>
+        )}
+      </Section>
 
       {!report.configured ? (
         <EmptyState title="Connect Google Analytics 4" body={report.note ?? "GA4 not connected."} />
