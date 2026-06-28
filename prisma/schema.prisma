@@ -363,6 +363,26 @@ enum EmailProcessingStatus {
   FAILED
 }
 
+/// Run-level monitoring for the Gmail sync (one row per sync attempt). Powers
+/// the Gmail health endpoint: last success/failure, duration, counts.
+model GmailSyncLog {
+  id          String    @id @default(cuid())
+  trigger     String    @default("cron") // cron | manual | api
+  status      String // SUCCESS | PARTIAL | FAILED | SKIPPED
+  scanned     Int       @default(0)
+  ingested    Int       @default(0)
+  duplicates  Int       @default(0)
+  failures    Int       @default(0)
+  durationMs  Int       @default(0)
+  error       String?
+  note        String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  @@index([status, startedAt])
+  @@index([startedAt])
+}
+
 /// Audit log of every email/report processed (idempotency + observability).
 model EmailProcessingLog {
   id            String                @id @default(cuid())

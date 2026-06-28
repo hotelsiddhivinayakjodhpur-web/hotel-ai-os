@@ -15,8 +15,8 @@ export async function POST(req: NextRequest) {
   if (!isAuthorized(req, env.STAYFLEXI_WEBHOOK_SECRET ?? env.CRON_SECRET)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const result = await syncGmailReports();
-  return NextResponse.json({ ok: true, ...result });
+  const result = await syncGmailReports("api");
+  return NextResponse.json({ ok: result.status !== "FAILED", ...result });
 }
 
 export async function GET(req: NextRequest) {

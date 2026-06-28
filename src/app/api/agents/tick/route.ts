@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   // failure never blocks the agent run.
   let gmail: Awaited<ReturnType<typeof syncGmailReports>> | null = null;
   if (gmailConfigured()) {
-    gmail = await syncGmailReports().catch(() => null);
+    gmail = await syncGmailReports("cron").catch(() => null);
   }
   const results = await tick(force);
   return NextResponse.json({ ok: true, gmail, ran: results.length, results });

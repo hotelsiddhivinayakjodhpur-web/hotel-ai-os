@@ -110,4 +110,21 @@ export const reportRepository = {
   recentLogs(take = 25) {
     return prisma.emailProcessingLog.findMany({ orderBy: { createdAt: "desc" }, take });
   },
+
+  // ── Gmail sync-run monitoring ──
+  createSyncLog(data: Prisma.GmailSyncLogUncheckedCreateInput) {
+    return prisma.gmailSyncLog.create({ data });
+  },
+  latestSyncLog() {
+    return prisma.gmailSyncLog.findFirst({ orderBy: { startedAt: "desc" } });
+  },
+  latestSyncByStatus(status: string) {
+    return prisma.gmailSyncLog.findFirst({ where: { status }, orderBy: { startedAt: "desc" } });
+  },
+  recentSyncLogs(take = 10) {
+    return prisma.gmailSyncLog.findMany({ orderBy: { startedAt: "desc" }, take });
+  },
+  countDuplicates() {
+    return prisma.emailProcessingLog.count({ where: { status: "DUPLICATE" } });
+  },
 };
