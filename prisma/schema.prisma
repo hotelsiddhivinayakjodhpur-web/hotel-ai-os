@@ -383,6 +383,26 @@ model GmailSyncLog {
   @@index([startedAt])
 }
 
+/// Settings & Connections registry state (single source of truth metadata).
+///
+/// Stores only NON-SECRET operational metadata per connection — enable/disable,
+/// last test result, last sync, last error, and a manual status override.
+/// Credentials themselves live ONLY in environment variables and are never
+/// stored here.
+model ConnectionState {
+  id             String    @id @default(cuid())
+  connectionId   String    @unique // matches the registry id (e.g. "ga4")
+  enabled        Boolean   @default(true) // false = user Disconnected it
+  manualStatus   String? // optional override: APP_REVIEW | PERMISSION_DENIED | ...
+  lastStatus     String? // last computed/tested status
+  lastError      String?
+  lastTestAt     DateTime?
+  lastSyncAt     DateTime?
+  metadata       Json? // non-secret extras (account id, plan, etc.)
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+}
+
 /// Audit log of every email/report processed (idempotency + observability).
 model EmailProcessingLog {
   id            String                @id @default(cuid())

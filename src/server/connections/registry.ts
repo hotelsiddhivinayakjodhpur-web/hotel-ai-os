@@ -1,0 +1,285 @@
+import type { ConnectionDef } from "./types";
+
+/**
+ * THE registry — every external connection the Hotel Siddhi Vinayak AI OS uses.
+ * Declarative only: no credentials, no logic. Credentials come from the env vars
+ * named here. Future departments consume this list to know what is connected.
+ */
+export const CONNECTIONS: ConnectionDef[] = [
+  // ── Google ──
+  {
+    id: "google-account",
+    name: "Google Account (Gmail)",
+    category: "Google",
+    icon: "✉",
+    owner: "hotelsiddhivinayakjodhpur@gmail.com",
+    description: "OAuth access to the hotel mailbox for Stayflexi Night Audit automation.",
+    docsUrl: "https://developers.google.com/gmail/api",
+    env: [
+      { key: "GMAIL_CLIENT_ID", secret: false },
+      { key: "GMAIL_CLIENT_SECRET", secret: true },
+      { key: "GMAIL_REFRESH_TOKEN", secret: true },
+    ],
+    testable: true,
+  },
+  {
+    id: "ga4",
+    name: "Google Analytics 4",
+    category: "Google",
+    icon: "▣",
+    owner: "hotel-ai@hotel-siddhi-vinayak-ai.iam.gserviceaccount.com",
+    description: "Website traffic, engagement and conversion analytics.",
+    docsUrl: "https://developers.google.com/analytics/devguides/reporting/data/v1",
+    env: [
+      { key: "GA4_PROPERTY_ID", secret: false },
+      { key: "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", secret: true },
+    ],
+    testable: true,
+  },
+  {
+    id: "search-console",
+    name: "Google Search Console",
+    category: "Google",
+    icon: "↗",
+    owner: "hotel-ai@hotel-siddhi-vinayak-ai.iam.gserviceaccount.com",
+    description: "Organic search performance, queries, pages and indexing.",
+    docsUrl: "https://developers.google.com/webmaster-tools",
+    env: [
+      { key: "GSC_SITE_URL", secret: false },
+      { key: "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", secret: true },
+    ],
+    testable: true,
+  },
+  {
+    id: "google-business",
+    name: "Google Business Profile",
+    category: "Google",
+    icon: "◉",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Local listing: posts, reviews, Q&A, photos, insights.",
+    docsUrl: "https://developers.google.com/my-business",
+    env: [
+      { key: "GBP_ACCOUNT_ID", secret: false },
+      { key: "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+  {
+    id: "google-ads",
+    name: "Google Ads",
+    category: "Google",
+    icon: "◎",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Search/Display campaigns, keywords, budgets, conversions, ROAS.",
+    docsUrl: "https://developers.google.com/google-ads/api/docs/start",
+    env: [
+      { key: "GOOGLE_ADS_CUSTOMER_ID", secret: false },
+      { key: "GOOGLE_ADS_DEVELOPER_TOKEN", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+  {
+    id: "youtube",
+    name: "YouTube",
+    category: "Google",
+    icon: "▶",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Channel analytics + video/shorts metadata.",
+    docsUrl: "https://developers.google.com/youtube/v3",
+    env: [{ key: "YOUTUBE_API_KEY", secret: true }],
+    optionalEnv: [{ key: "YOUTUBE_CHANNEL_ID", secret: false }],
+    testable: true,
+  },
+
+  // ── Meta ──
+  {
+    id: "meta-business",
+    name: "Meta Business",
+    category: "Meta",
+    icon: "◭",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Meta Business account linking Facebook, Instagram and Ads assets.",
+    docsUrl: "https://developers.facebook.com/docs/development",
+    env: [
+      { key: "META_BUSINESS_ID", secret: false },
+      { key: "META_ACCESS_TOKEN", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+  {
+    id: "facebook",
+    name: "Facebook Page",
+    category: "Meta",
+    icon: "f",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Page posts, insights and scheduling.",
+    docsUrl: "https://developers.facebook.com/docs/pages-api",
+    env: [
+      { key: "FACEBOOK_PAGE_ID", secret: false },
+      { key: "FACEBOOK_ACCESS_TOKEN", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+  {
+    id: "instagram",
+    name: "Instagram",
+    category: "Meta",
+    icon: "◐",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Business account: media, insights, publishing.",
+    docsUrl: "https://developers.facebook.com/docs/instagram-api",
+    env: [
+      { key: "INSTAGRAM_BUSINESS_ID", secret: false },
+      { key: "META_ACCESS_TOKEN", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+  {
+    id: "meta-ads",
+    name: "Meta Ads",
+    category: "Meta",
+    icon: "◈",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Ad campaigns, audiences, pixel, budgets, performance.",
+    docsUrl: "https://developers.facebook.com/docs/marketing-apis",
+    env: [
+      { key: "META_ADS_ACCOUNT_ID", secret: false },
+      { key: "META_ACCESS_TOKEN", secret: true },
+    ],
+    testable: false,
+    requiresAppReview: true,
+  },
+
+  // ── Booking ──
+  {
+    id: "stayflexi",
+    name: "Stayflexi PMS",
+    category: "Booking",
+    icon: "◧",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Booking Engine + Channel Manager (production API pending; Gmail bridges today).",
+    docsUrl: "https://www.stayflexi.com",
+    env: [
+      { key: "STAYFLEXI_GROUP_ID", secret: false },
+      { key: "STAYFLEXI_BE_API_KEY", secret: true },
+      { key: "STAYFLEXI_PMS_ID", secret: false },
+      { key: "STAYFLEXI_CM_API_KEY", secret: true },
+    ],
+    testable: false,
+  },
+
+  // ── AI + aggregator ──
+  {
+    id: "windsor",
+    name: "Windsor.ai",
+    category: "AI",
+    icon: "◊",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Marketing data aggregator (Ads, Meta, GA4, GSC, social) via one API.",
+    docsUrl: "https://windsor.ai/api-fields/",
+    env: [{ key: "WINDSOR_API_KEY", secret: true }],
+    testable: true,
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    category: "AI",
+    icon: "◍",
+    owner: "Hotel Siddhi Vinayak",
+    description: "LLM for content generation (blogs, captions, replies).",
+    docsUrl: "https://platform.openai.com/docs",
+    env: [{ key: "OPENAI_API_KEY", secret: true }],
+    testable: true,
+  },
+  {
+    id: "claude",
+    name: "Claude (Anthropic)",
+    category: "AI",
+    icon: "✳",
+    owner: "Hotel Siddhi Vinayak",
+    description: "LLM for reasoning, briefings and content.",
+    docsUrl: "https://docs.anthropic.com",
+    env: [{ key: "ANTHROPIC_API_KEY", secret: true }],
+    testable: true,
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    category: "AI",
+    icon: "✦",
+    owner: "Hotel Siddhi Vinayak",
+    description: "LLM + image prompts for creative content.",
+    docsUrl: "https://ai.google.dev/docs",
+    env: [{ key: "GEMINI_API_KEY", secret: true }],
+    testable: true,
+  },
+
+  // ── Automation ──
+  {
+    id: "n8n",
+    name: "n8n Automation",
+    category: "Automation",
+    icon: "⚙",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Workflow automation hub (Gmail ingestion, scheduling).",
+    docsUrl: "https://docs.n8n.io/api/",
+    env: [{ key: "N8N_BASE_URL", secret: false }],
+    optionalEnv: [{ key: "N8N_API_KEY", secret: true }],
+    testable: true,
+  },
+  {
+    id: "cron",
+    name: "Cron Jobs",
+    category: "Automation",
+    icon: "⏱",
+    owner: "Vercel",
+    description: "Daily scheduled runs (Gmail sync + agents).",
+    docsUrl: "https://vercel.com/docs/cron-jobs",
+    env: [{ key: "CRON_SECRET", secret: true }],
+    testable: true,
+  },
+
+  // ── Infrastructure ──
+  {
+    id: "supabase",
+    name: "Supabase (PostgreSQL)",
+    category: "Infrastructure",
+    icon: "⛁",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Primary database for all parsed data, agents and connection state.",
+    docsUrl: "https://supabase.com/docs",
+    env: [
+      { key: "DATABASE_URL", secret: true },
+      { key: "DIRECT_URL", secret: true },
+    ],
+    testable: true,
+  },
+  {
+    id: "smtp",
+    name: "SMTP Email",
+    category: "Infrastructure",
+    icon: "✧",
+    owner: "Hotel Siddhi Vinayak",
+    description: "Outbound email for reports and alerts.",
+    docsUrl: "https://nodemailer.com/smtp/",
+    env: [
+      { key: "SMTP_HOST", secret: false },
+      { key: "SMTP_USER", secret: false },
+      { key: "SMTP_PASSWORD", secret: true },
+    ],
+    optionalEnv: [
+      { key: "SMTP_PORT", secret: false },
+      { key: "SMTP_FROM", secret: false },
+    ],
+    testable: false,
+  },
+];
+
+export function getConnectionDef(id: string): ConnectionDef | undefined {
+  return CONNECTIONS.find((c) => c.id === id);
+}

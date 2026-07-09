@@ -73,6 +73,39 @@ const schema = z.object({
   // Sender to trust for reports (defaults to Stayflexi's admin address).
   GMAIL_REPORT_SENDER: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("admin@stayflexi.com")),
 
+  // ── Marketing / AI platform credentials (all optional; read via the
+  //    Settings & Connections registry — never hardcoded). Unset = NOT_CONFIGURED.
+  // Google Business Profile / Ads / YouTube
+  GBP_ACCOUNT_ID: optionalStr,
+  GOOGLE_ADS_CUSTOMER_ID: optionalStr,
+  GOOGLE_ADS_DEVELOPER_TOKEN: optionalStr,
+  YOUTUBE_API_KEY: optionalStr,
+  YOUTUBE_CHANNEL_ID: optionalStr,
+  // Meta (Business / Facebook / Instagram / Ads)
+  META_BUSINESS_ID: optionalStr,
+  FACEBOOK_PAGE_ID: optionalStr,
+  FACEBOOK_ACCESS_TOKEN: optionalStr,
+  INSTAGRAM_BUSINESS_ID: optionalStr,
+  META_ADS_ACCOUNT_ID: optionalStr,
+  META_ACCESS_TOKEN: optionalStr,
+  // Aggregator
+  WINDSOR_API_KEY: optionalStr,
+  // AI providers
+  OPENAI_API_KEY: optionalStr,
+  ANTHROPIC_API_KEY: optionalStr,
+  GEMINI_API_KEY: optionalStr,
+  // Automation + email
+  N8N_BASE_URL: optionalUrl,
+  N8N_API_KEY: optionalStr,
+  SMTP_HOST: optionalStr,
+  SMTP_PORT: optionalStr,
+  SMTP_USER: optionalStr,
+  SMTP_PASSWORD: optionalStr,
+  SMTP_FROM: optionalStr,
+  // Owner dashboard (already used by /ceo middleware + login action)
+  CEO_DASH_SECRET: optionalStr,
+  CEO_DASH_PASSWORD_HASH: optionalStr,
+
   // App
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
