@@ -400,6 +400,19 @@ model ContentItem {
   @@index([status, scheduledFor])
 }
 
+/// Manual competitor observations (Competitor Watch — manual mode). Generic
+/// across platforms so Facebook/YouTube AI reuse the same table later.
+model CompetitorNote {
+  id         String   @id @default(cuid())
+  platform   String // INSTAGRAM | FACEBOOK | YOUTUBE | GBP
+  handle     String
+  followers  Int?
+  note       String?
+  recordedAt DateTime @default(now())
+
+  @@index([platform, handle, recordedAt])
+}
+
 /// Settings & Connections registry state (single source of truth metadata).
 ///
 /// Stores only NON-SECRET operational metadata per connection — enable/disable,
