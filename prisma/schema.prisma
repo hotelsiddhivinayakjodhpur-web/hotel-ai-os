@@ -383,6 +383,23 @@ model GmailSyncLog {
   @@index([startedAt])
 }
 
+/// Content AI — every generated content draft, reusable by all departments
+/// (GBP, Instagram, Facebook, YouTube, SEO). Drafts only; never auto-published.
+model ContentItem {
+  id           String    @id @default(cuid())
+  channel      String // BLOG | GBP_POST | INSTAGRAM | FACEBOOK | YOUTUBE | FAQ | OFFER | FESTIVAL | ATTRACTION | ROOM
+  title        String
+  body         String
+  meta         Json? // channel-specific extras (hashtags, cta, dates, tags)
+  status       String    @default("DRAFT") // DRAFT | APPROVED | USED | ARCHIVED
+  scheduledFor DateTime? // powers the Content Calendar
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([channel, createdAt])
+  @@index([status, scheduledFor])
+}
+
 /// Settings & Connections registry state (single source of truth metadata).
 ///
 /// Stores only NON-SECRET operational metadata per connection — enable/disable,
