@@ -16,6 +16,7 @@ export const NAV: NavItem[] = [
   { href: "/facebook", label: "Facebook AI", icon: "◭", description: "Page posts & engagement" },
   { href: "/youtube", label: "YouTube AI", icon: "▶", description: "Shorts, videos & channel growth" },
   { href: "/google-ads", label: "Google Ads AI", icon: "◎", description: "Campaign intelligence (read-only)" },
+  { href: "/meta-ads", label: "Meta Ads AI", icon: "◈", description: "Meta campaigns (read-only)" },
   { href: "/analytics", label: "Analytics AI", icon: "▣", description: "Unified data" },
   { href: "/operations", label: "AI Operations", icon: "⛭", description: "Agent control room" },
   { href: "/ceo", label: "CEO Dashboard", icon: "▦", description: "AI OS monitoring (read-only)" },
