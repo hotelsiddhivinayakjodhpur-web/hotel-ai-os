@@ -12,4 +12,5 @@ export const NAV: NavItem[] = [
   { href: "/seo", label: "SEO AI", icon: "↗", description: "Search visibility" },
   { href: "/analytics", label: "Analytics AI", icon: "▣", description: "Unified data" },
   { href: "/operations", label: "AI Operations", icon: "⛭", description: "Agent control room" },
+  { href: "/ceo", label: "CEO Dashboard", icon: "▦", description: "AI OS monitoring (read-only)" },
 ];

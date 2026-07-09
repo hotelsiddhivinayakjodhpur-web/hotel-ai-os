@@ -111,6 +111,129 @@ export function NotConnected({ title, body }: { title: string; body: string }) {
   );
 }
 
+// --- Read-only data table (monitoring only; no row actions) ---
+export type Column<T> = {
+  header: string;
+  cell: (row: T) => ReactNode;
+  className?: string;
+};
+
+export function DataTable<T>({
+  columns,
+  rows,
+  empty = "No data yet",
+  emptyBody = "This populates automatically as the AI handles live conversations.",
+  minWidth = 720,
+}: {
+  columns: Column<T>[];
+  rows: T[];
+  empty?: string;
+  emptyBody?: string;
+  minWidth?: number;
+}) {
+  if (!rows.length) {
+    return <EmptyState title={empty} body={emptyBody} />;
+  }
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-panel">
+      <table className="w-full border-collapse text-sm" style={{ minWidth }}>
+        <thead className="sticky top-0 z-10 bg-panel">
+          <tr className="border-b border-border text-left">
+            {columns.map((c, i) => (
+              <th
+                key={i}
+                className={`whitespace-nowrap px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted ${c.className ?? ""}`}
+              >
+                {c.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr
+              key={ri}
+              className="border-b border-border/60 transition-colors last:border-b-0 hover:bg-border/30"
+            >
+              {columns.map((c, ci) => (
+                <td key={ci} className={`px-4 py-3 align-top text-text ${c.className ?? ""}`}>
+                  {c.cell(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Maps a free-text status / lead-score string to a tone badge. Unknown -> muted; null -> em dash.
+export function StatusBadge({ value }: { value: string | null | undefined }) {
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-muted">—</span>;
+  }
+  const v = value.toLowerCase();
+  const tone: "muted" | "ok" | "warn" | "crit" | "info" = [
+    "resolved",
+    "completed",
+    "booked",
+    "confirmed",
+    "done",
+  ].includes(v)
+    ? "ok"
+    : ["queued", "pending", "in_review", "open", "new", "warm"].includes(v)
+      ? "warn"
+      : ["critical", "complaint", "emergency", "lost", "failed", "hot"].includes(v)
+        ? "crit"
+        : ["cold"].includes(v)
+          ? "info"
+          : "muted";
+  return <Pill tone={tone}>{value}</Pill>;
+}
+
+// --- Lightweight, server-rendered horizontal bar chart (no JS, no animation) ---
+export type BarDatum = {
+  label: string;
+  value: number;
+  tone?: "ok" | "warn" | "crit" | "info" | "muted";
+};
+
+export function BarChart({ data, caption }: { data: BarDatum[]; caption?: string }) {
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const total = data.reduce((s, d) => s + d.value, 0);
+  const toneBg: Record<string, string> = {
+    ok: "bg-ok",
+    warn: "bg-warn",
+    crit: "bg-crit",
+    info: "bg-info",
+    muted: "bg-muted",
+  };
+  return (
+    <figure
+      className="card space-y-2.5"
+      role="img"
+      aria-label={caption ?? data.map((d) => `${d.label}: ${d.value}`).join(", ")}
+    >
+      {data.map((d, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <div className="w-24 shrink-0 truncate text-xs text-muted sm:w-28" title={d.label}>
+            {d.label}
+          </div>
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-border" aria-hidden>
+            <div
+              className={`h-full rounded-full ${toneBg[d.tone ?? "info"]}`}
+              style={{ width: d.value > 0 ? `${Math.max(3, (d.value / max) * 100)}%` : "0%" }}
+            />
+          </div>
+          <div className="w-8 shrink-0 text-right text-sm font-semibold tabular-nums text-text">{d.value}</div>
+        </div>
+      ))}
+      {total === 0 && <figcaption className="pt-1 text-xs text-muted">No activity recorded yet.</figcaption>}
+    </figure>
+  );
+}
+
 export function HealthBar({ value }: { value: number }) {
   const tone = value >= 75 ? "bg-ok" : value >= 50 ? "bg-warn" : "bg-crit";
   return (
