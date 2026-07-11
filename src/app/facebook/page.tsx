@@ -15,7 +15,7 @@ export default async function FacebookDashboard() {
     <div>
       <PageHeader
         title="Facebook AI"
-        subtitle="Adapts Content AI drafts into Facebook posts — analytics via the optional Windsor connector"
+        subtitle="Adapts Content AI drafts into Facebook posts — analytics via the official Meta Graph API"
         action={<Pill tone={p.status === "LIVE" ? "ok" : "warn"}>{p.status === "LIVE" ? "Analytics live" : "Analytics waiting"}</Pill>}
       />
       <FacebookNav />
@@ -25,7 +25,7 @@ export default async function FacebookDashboard() {
         <div className="grid gap-4 md:grid-cols-3">
           <StatusCard name="Content AI" ok detail="ContentItem · channel = FACEBOOK" />
           <StatusCard
-            name="Windsor Facebook Organic (optional)"
+            name="Meta Graph API (Pages)"
             ok={p.status === "LIVE"}
             detail={p.status === "LIVE" ? "Delivering data" : (p.reason ?? "Not connected")}
           />

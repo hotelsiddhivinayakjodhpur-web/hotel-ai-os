@@ -14,7 +14,7 @@ export default async function FacebookInsightsPage() {
   const daily = fb.daily;
   const posts = fb.posts;
 
-  const imprSeries: Point[] = daily.data?.series.map((p) => ({ label: shortDate(p.date), value: p.impressions })) ?? [];
+  const viewsSeries: Point[] = daily.data?.series.map((p) => ({ label: shortDate(p.date), value: p.pageViews })) ?? [];
   const engSeries: Point[] = daily.data?.series.map((p) => ({ label: shortDate(p.date), value: p.engagements })) ?? [];
 
   return (
@@ -31,13 +31,13 @@ export default async function FacebookInsightsPage() {
         {daily.status === "LIVE" && daily.data ? (
           <>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <StatCard label="Impressions" value={fmtInt(daily.data.totals.impressions)} />
-              <StatCard label="Unique Reach" value={fmtInt(daily.data.totals.uniqueImpressions)} />
               <StatCard label="Engagements" value={fmtInt(daily.data.totals.engagements)} tone="info" />
               <StatCard label="New Follows" value={fmtInt(daily.data.totals.newFollows)} tone="ok" />
+              <StatCard label="Page Views" value={fmtInt(daily.data.totals.pageViews)} />
+              <StatCard label="Total Actions" value={fmtInt(daily.data.totals.totalActions)} />
             </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <ChartCard title="Impressions (daily)"><LineChart series={imprSeries} label="Impressions" valueFormat={(n) => fmtInt(n)} /></ChartCard>
+              <ChartCard title="Page Views (daily)"><LineChart series={viewsSeries} label="Page Views" valueFormat={(n) => fmtInt(n)} /></ChartCard>
               <ChartCard title="Engagements (daily)"><LineChart series={engSeries} label="Engagements" valueFormat={(n) => fmtInt(n)} /></ChartCard>
             </div>
           </>
@@ -58,7 +58,6 @@ export default async function FacebookInsightsPage() {
                     <span className="text-[11px] text-muted">{m.createdAt ? shortDate(m.createdAt) : ""}</span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
-                    <span>👁 {fmtInt(m.impressions)}</span>
                     <span>👍 {fmtInt(m.reactions)}</span>
                     <span>💬 {fmtInt(m.comments)}</span>
                     {m.permalink && <a href={m.permalink} target="_blank" rel="noreferrer" className="text-brand underline">open</a>}

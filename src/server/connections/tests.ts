@@ -5,6 +5,8 @@ import { getGmailAccessToken } from "@/server/gmail/gmail-auth";
 import { GOOGLE_SCOPES, getAccessToken } from "@/server/integrations/google-auth";
 import { gscStatus } from "@/server/integrations/gsc-client";
 import { ga4Status } from "@/server/integrations/ga4-client";
+import { youtubeConfigured, ytData, YouTubeApiError } from "@/server/integrations/youtube-client";
+import { fbConfigured, igConfigured, graphGet, graphPageGet, MetaApiError } from "@/server/integrations/meta-graph-client";
 import type { ConnectionTestResult } from "./types";
 
 /**
@@ -81,12 +83,49 @@ export const CONNECTION_TESTS: Record<string, () => Promise<ConnectionTestResult
   },
 
   youtube: async () => {
-    if (!env.YOUTUBE_API_KEY) return fail("NOT_CONFIGURED", "YOUTUBE_API_KEY not set.");
+    if (!youtubeConfigured()) return fail("NOT_CONFIGURED", "YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN not set.");
     try {
-      const idPart = env.YOUTUBE_CHANNEL_ID ? `&id=${env.YOUTUBE_CHANNEL_ID}` : "&forHandle=@hotel";
-      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id${idPart}&key=${env.YOUTUBE_API_KEY}`);
-      return r.ok ? ok("YouTube Data API reachable") : fail(mapHttp(r.status, await r.text()), `YouTube ${r.status}`);
+      const ch = await ytData<{ items?: { snippet?: { title?: string }; statistics?: { subscriberCount?: string } }[] }>(
+        "channels",
+        { part: "snippet,statistics", mine: "true" },
+      );
+      const c = ch.items?.[0];
+      if (!c) return fail("PERMISSION_DENIED", "OAuth token has no YouTube channel.");
+      return ok(`${c.snippet?.title ?? "Channel"} · ${c.statistics?.subscriberCount ?? 0} subscribers`);
     } catch (e) {
+      if (e instanceof YouTubeApiError) return fail(mapHttp(e.status, e.message), e.reason);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/token refresh failed|invalid_grant|\b400\b/i.test(msg)) return fail("TOKEN_EXPIRED", msg);
+      return fail("ERROR", msg);
+    }
+  },
+
+  facebook: async () => {
+    if (!fbConfigured()) return fail("NOT_CONFIGURED", "META_ACCESS_TOKEN / FACEBOOK_PAGE_ID not set.");
+    try {
+      const r = await graphPageGet<{ name?: string; fan_count?: number }>(`${env.FACEBOOK_PAGE_ID}`, { fields: "name,fan_count" });
+      return ok(`${r.name ?? "Page"} · ${r.fan_count ?? 0} likes`);
+    } catch (e) {
+      if (e instanceof MetaApiError) {
+        if (e.code === 190) return fail("TOKEN_EXPIRED", e.reason);
+        if (e.code === 10 || e.code === 200 || e.code === 283) return fail("PERMISSION_DENIED", e.reason);
+        return fail(mapHttp(e.httpStatus, e.message), e.reason);
+      }
+      return fail("ERROR", e instanceof Error ? e.message : String(e));
+    }
+  },
+
+  instagram: async () => {
+    if (!igConfigured()) return fail("NOT_CONFIGURED", "META_ACCESS_TOKEN / INSTAGRAM_BUSINESS_ID not set.");
+    try {
+      const r = await graphGet<{ username?: string; followers_count?: number }>(`${env.INSTAGRAM_BUSINESS_ID}`, { fields: "username,followers_count" });
+      return ok(`@${r.username ?? "account"} · ${r.followers_count ?? 0} followers`);
+    } catch (e) {
+      if (e instanceof MetaApiError) {
+        if (e.code === 190) return fail("TOKEN_EXPIRED", e.reason);
+        if (e.code === 10 || e.code === 200 || e.code === 283) return fail("PERMISSION_DENIED", e.reason);
+        return fail(mapHttp(e.httpStatus, e.message), e.reason);
+      }
       return fail("ERROR", e instanceof Error ? e.message : String(e));
     }
   },

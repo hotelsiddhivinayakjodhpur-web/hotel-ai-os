@@ -1,6 +1,14 @@
 import { cached, TTL } from "@/lib/cache";
+import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
-import { windsorConfigured, windsorQuery } from "@/server/integrations/windsor-client";
+import {
+  igConfigured,
+  graphGet,
+  sumInsight,
+  MetaApiError,
+  type GraphIgMediaResponse,
+  type GraphInsightsResponse,
+} from "@/server/integrations/meta-graph-client";
 import { listContent } from "./content.service";
 import { safeDb } from "./db-guard";
 
@@ -8,8 +16,8 @@ import { safeDb } from "./db-guard";
  * Instagram AI — data layer. Consumes:
  *  - Content AI (ContentItem channel=INSTAGRAM) for the queue/calendar — the
  *    single content source, adapted not regenerated;
- *  - Windsor.ai `instagram` connector (OPTIONAL) for live analytics — every
- *    section degrades to "Waiting for Production Connection" honestly;
+ *  - Official Instagram Graph API via meta-graph-client for live analytics —
+ *    every section degrades to "Waiting for Production Connection" honestly;
  *  - CompetitorNote (manual mode) for competitor watch.
  */
 export type IgSectionStatus = "LIVE" | "WAITING" | "NOT_CONFIGURED";
@@ -80,6 +88,103 @@ function sec<T>(status: IgSectionStatus, data: T | null, reason?: string): IgSec
   return { status, data, reason };
 }
 
+function failReason(e: unknown): string {
+  return e instanceof MetaApiError ? e.reason : e instanceof Error ? e.message : String(e);
+}
+
+function unixDaysAgo(days: number): string {
+  return String(Math.floor(Date.now() / 1000) - days * 86_400);
+}
+
+// ── Graph fetchers (official Instagram API; user-token authenticated) ───────
+
+async function fetchIgProfile(): Promise<IgProfile> {
+  const r = await graphGet<{
+    username?: string;
+    followers_count?: number;
+    follows_count?: number;
+    media_count?: number;
+    biography?: string;
+    website?: string;
+  }>(`${env.INSTAGRAM_BUSINESS_ID}`, { fields: "username,followers_count,follows_count,media_count,biography,website" });
+  return {
+    username: r.username ?? "",
+    followers: Number(r.followers_count ?? 0),
+    follows: Number(r.follows_count ?? 0),
+    mediaCount: Number(r.media_count ?? 0),
+    biography: r.biography ?? null,
+    website: r.website ?? null,
+  };
+}
+
+interface IgDailyFetch {
+  series: IgDailyPoint[];
+  viewsTotal: number | null;
+  interactionsTotal: number | null;
+}
+
+async function fetchIgDaily(): Promise<IgDailyFetch> {
+  const window = { since: unixDaysAgo(30), until: unixDaysAgo(0) };
+
+  // reach + follower_count are day-series metrics; views + total_interactions
+  // only support metric_type=total_value on the current IG API, so the window
+  // totals come from a second call. Each call degrades independently.
+  const [seriesRes, totalsRes] = await Promise.allSettled([
+    graphGet<GraphInsightsResponse>(`${env.INSTAGRAM_BUSINESS_ID}/insights`, { metric: "reach,follower_count", period: "day", ...window }),
+    graphGet<GraphInsightsResponse>(`${env.INSTAGRAM_BUSINESS_ID}/insights`, {
+      metric: "views,total_interactions",
+      period: "day",
+      metric_type: "total_value",
+      ...window,
+    }),
+  ]);
+  if (seriesRes.status === "rejected" && totalsRes.status === "rejected") throw seriesRes.reason;
+
+  const byDate = new Map<string, IgDailyPoint>();
+  if (seriesRes.status === "fulfilled") {
+    for (const m of seriesRes.value.data ?? []) {
+      for (const v of m.values ?? []) {
+        const date = (v.end_time ?? "").slice(0, 10);
+        if (!date) continue;
+        const pt = byDate.get(date) ?? { date, reach: 0, newFollowers: 0, views: 0, interactions: 0 };
+        const val = typeof v.value === "number" ? v.value : 0;
+        if (m.name === "reach") pt.reach = val;
+        else if (m.name === "follower_count") pt.newFollowers = val;
+        byDate.set(date, pt);
+      }
+    }
+  }
+
+  let viewsTotal: number | null = null;
+  let interactionsTotal: number | null = null;
+  if (totalsRes.status === "fulfilled") {
+    for (const m of totalsRes.value.data ?? []) {
+      if (m.name === "views") viewsTotal = sumInsight(m);
+      else if (m.name === "total_interactions") interactionsTotal = sumInsight(m);
+    }
+  }
+
+  return { series: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)), viewsTotal, interactionsTotal };
+}
+
+async function fetchIgMedia(): Promise<IgMediaItem[]> {
+  const r = await graphGet<GraphIgMediaResponse>(`${env.INSTAGRAM_BUSINESS_ID}/media`, {
+    fields: "caption,media_type,like_count,comments_count,permalink,timestamp",
+    limit: "25",
+  });
+  return (r.data ?? [])
+    .filter((m) => m.caption || m.permalink)
+    .map((m) => ({
+      caption: (m.caption ?? "").slice(0, 140),
+      type: m.media_type ?? "IMAGE",
+      likes: Number(m.like_count ?? 0),
+      comments: Number(m.comments_count ?? 0),
+      permalink: m.permalink ?? null,
+      postedAt: m.timestamp ?? null,
+    }))
+    .sort((a, b) => (b.postedAt ?? "").localeCompare(a.postedAt ?? ""));
+}
+
 export async function getInstagramOverview(): Promise<InstagramOverview> {
   return cached("instagram:overview", TTL.medium, buildOverview);
 }
@@ -100,76 +205,48 @@ async function buildOverview(): Promise<InstagramOverview> {
     }).length,
   };
 
-  // ── Windsor analytics (optional) ──
+  // ── Official Instagram Graph API — each section degrades independently ──
   let profile: IgSection<IgProfile>;
   let daily: IgSection<IgDailyData>;
   let media: IgSection<IgMediaData>;
 
-  if (!windsorConfigured()) {
-    const reason = "Windsor.ai not connected (optional connector).";
+  if (!igConfigured()) {
+    const reason = "Meta Graph not connected (set META_ACCESS_TOKEN + INSTAGRAM_BUSINESS_ID).";
     profile = sec<IgProfile>("NOT_CONFIGURED", null, reason);
     daily = sec<IgDailyData>("NOT_CONFIGURED", null, reason);
     media = sec<IgMediaData>("NOT_CONFIGURED", null, reason);
   } else {
-    const [prof, series, mediaRows] = await Promise.all([
-      windsorQuery("instagram", ["username", "followers_count", "follows_count", "media_count", "biography", "website"], { datePreset: "last_7d" }),
-      windsorQuery("instagram", ["date", "reach_1d", "follower_count_1d", "views", "total_interactions"], { datePreset: "last_30d" }),
-      windsorQuery("instagram", ["media_caption", "media_type", "media_like_count", "media_comments_count", "media_permalink", "timestamp"], { datePreset: "last_3m" }),
-    ]);
+    const [profRes, dailyRes, mediaRes] = await Promise.allSettled([fetchIgProfile(), fetchIgDaily(), fetchIgMedia()]);
 
-    if (!prof.ok) profile = sec<IgProfile>("WAITING", null, prof.reason);
+    if (profRes.status === "rejected") profile = sec<IgProfile>("WAITING", null, failReason(profRes.reason));
     else {
-      const r = prof.rows.find((x) => x.username) ?? prof.rows[0];
-      profile = r
-        ? sec<IgProfile>("LIVE", {
-            username: String(r.username ?? ""),
-            followers: Number(r.followers_count ?? 0),
-            follows: Number(r.follows_count ?? 0),
-            mediaCount: Number(r.media_count ?? 0),
-            biography: r.biography ? String(r.biography) : null,
-            website: r.website ? String(r.website) : null,
-          })
-        : sec<IgProfile>("WAITING", null, "No profile data returned yet.");
-      if (profile.data && !profile.data.username && profile.data.followers === 0) {
-        profile = sec<IgProfile>("WAITING", null, "No profile data returned yet.");
-      }
+      const p = profRes.value;
+      profile =
+        p.username || p.followers > 0
+          ? sec<IgProfile>("LIVE", p)
+          : sec<IgProfile>("WAITING", null, "No profile data returned yet.");
     }
 
-    if (!series.ok) daily = sec<IgDailyData>("WAITING", null, series.reason);
+    if (dailyRes.status === "rejected") daily = sec<IgDailyData>("WAITING", null, failReason(dailyRes.reason));
     else {
-      const pts: IgDailyPoint[] = series.rows
-        .map((r) => ({
-          date: String(r.date ?? ""),
-          reach: Number(r.reach_1d ?? 0),
-          newFollowers: Number(r.follower_count_1d ?? 0),
-          views: Number(r.views ?? 0),
-          interactions: Number(r.total_interactions ?? 0),
-        }))
-        .filter((p) => p.date)
-        .sort((a, b) => a.date.localeCompare(b.date));
+      const { series: pts, viewsTotal, interactionsTotal } = dailyRes.value;
       const totals = pts.reduce(
         (t, p) => ({ reach: t.reach + p.reach, newFollowers: t.newFollowers + p.newFollowers, views: t.views + p.views, interactions: t.interactions + p.interactions }),
         { reach: 0, newFollowers: 0, views: 0, interactions: 0 },
       );
+      // views/total_interactions are total_value-only metrics on the current
+      // IG API — the window totals come from Graph directly, not per-day sums.
+      totals.views = viewsTotal ?? totals.views;
+      totals.interactions = interactionsTotal ?? totals.interactions;
       const hasSignal = pts.length > 1 || totals.reach + totals.views + totals.interactions > 0;
       daily = hasSignal
         ? sec<IgDailyData>("LIVE", { series: pts, totals })
         : sec<IgDailyData>("WAITING", null, "No engagement data returned yet.");
     }
 
-    if (!mediaRows.ok) media = sec<IgMediaData>("WAITING", null, mediaRows.reason);
+    if (mediaRes.status === "rejected") media = sec<IgMediaData>("WAITING", null, failReason(mediaRes.reason));
     else {
-      const list: IgMediaItem[] = mediaRows.rows
-        .filter((r) => r.media_caption || r.media_permalink)
-        .map((r) => ({
-          caption: String(r.media_caption ?? "").slice(0, 140),
-          type: String(r.media_type ?? "IMAGE"),
-          likes: Number(r.media_like_count ?? 0),
-          comments: Number(r.media_comments_count ?? 0),
-          permalink: r.media_permalink ? String(r.media_permalink) : null,
-          postedAt: r.timestamp ? String(r.timestamp) : null,
-        }))
-        .sort((a, b) => (b.postedAt ?? "").localeCompare(a.postedAt ?? ""));
+      const list = mediaRes.value;
       media =
         list.length > 0
           ? sec<IgMediaData>("LIVE", { items: list.slice(0, 12), lastPostAt: list[0]?.postedAt ?? null })
@@ -193,7 +270,7 @@ async function buildOverview(): Promise<InstagramOverview> {
     if (daysSince >= 4) recommendations.push({ priority: "high", title: `${daysSince} days since the last post`, detail: "Consistency drives reach — publish an approved item today." });
   }
   if (profile.status !== "LIVE") {
-    recommendations.push({ priority: "low", title: "Live analytics not connected", detail: "Engagement, profile health and performance activate via the optional Windsor.ai connector (Settings)." });
+    recommendations.push({ priority: "low", title: "Live analytics not connected", detail: "Engagement, profile health and performance activate via the official Meta Graph connection (Settings → Instagram)." });
   }
 
   return { profile, daily, media, queue, recommendations };

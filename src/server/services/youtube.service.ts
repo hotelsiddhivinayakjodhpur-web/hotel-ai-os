@@ -1,6 +1,19 @@
 import { cached, TTL } from "@/lib/cache";
 import { ytFormatOf } from "@/lib/youtube-adapters";
-import { windsorConfigured, windsorQuery } from "@/server/integrations/windsor-client";
+import {
+  youtubeConfigured,
+  ytAnalyticsReport,
+  ytData,
+  YouTubeApiError,
+  type YtApiAnalyticsReport,
+  type YtApiChannel,
+  type YtApiChannelList,
+  type YtApiPlaylistItemList,
+  type YtApiPlaylistList,
+  type YtApiSearchList,
+  type YtApiVideo,
+  type YtApiVideoList,
+} from "@/server/integrations/youtube-client";
 import { listContent } from "./content.service";
 
 /**
@@ -8,11 +21,11 @@ import { listContent } from "./content.service";
  *  - Content AI (ContentItem channel=YOUTUBE) for queues/calendar — split into
  *    Shorts vs Long-form by the studio's title convention (adapted, never
  *    regenerated);
- *  - Windsor.ai `youtube` connector (OPTIONAL, shared marketing connector) for
- *    live analytics — every section degrades to "Waiting for Production
- *    Connection" honestly. Field names verified against the live catalog
- *    (subscriber_count, view_count, video_count, views,
- *    estimated_minutes_watched, subscribers_gained, video_title…).
+ *  - Official Google APIs via youtube-client (OAuth only):
+ *      Data API v3      → channel health + uploads (videos section)
+ *      Analytics API v2 → daily views / watch time / subs gained / likes
+ *    Every section degrades to an honest WAITING / NOT_CONFIGURED reason —
+ *    no fabricated data, ever.
  */
 export type YtSectionStatus = "LIVE" | "WAITING" | "NOT_CONFIGURED";
 
@@ -85,6 +98,136 @@ function sec<T>(status: YtSectionStatus, data: T | null, reason?: string): YtSec
   return { status, data, reason };
 }
 
+function failReason(e: unknown): string {
+  return e instanceof YouTubeApiError ? e.reason : e instanceof Error ? e.message : String(e);
+}
+
+function isoDay(msOffset = 0): string {
+  return new Date(Date.now() + msOffset).toISOString().slice(0, 10);
+}
+
+// ── Official API wrappers (OAuth only — youtube-client) ────────────────────
+
+/** The authenticated channel (snippet + statistics + uploads playlist id). */
+export async function getChannel(): Promise<YtApiChannel | null> {
+  const res = await ytData<YtApiChannelList>("channels", { part: "snippet,statistics,contentDetails", mine: "true" });
+  return res.items?.[0] ?? null;
+}
+
+/** Channel statistics only (subscribers / total views / video count). */
+export async function getStatistics(): Promise<YtChannelHealth | null> {
+  const ch = await getChannel();
+  if (!ch) return null;
+  return {
+    channelTitle: ch.snippet?.title ?? "",
+    subscribers: Number(ch.statistics?.subscriberCount ?? 0),
+    totalViews: Number(ch.statistics?.viewCount ?? 0),
+    videosPublished: Number(ch.statistics?.videoCount ?? 0),
+  };
+}
+
+/**
+ * Uploaded videos with statistics, newest first. Reads the uploads playlist
+ * (1 quota unit) instead of search.list (100 units).
+ */
+export async function getVideos(maxResults = 25): Promise<YtVideoItem[]> {
+  const ch = await getChannel();
+  const uploads = ch?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) return [];
+
+  const itemsRes = await getPlaylistItems(uploads, maxResults);
+  const ids = itemsRes
+    .map((i) => i.contentDetails?.videoId ?? i.snippet?.resourceId?.videoId)
+    .filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return [];
+
+  const vids = await ytData<YtApiVideoList>("videos", { part: "snippet,statistics", id: ids.join(","), maxResults: String(ids.length) });
+  return (vids.items ?? [])
+    .map(toVideoItem)
+    .sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""));
+}
+
+/** Latest uploads (newest first). */
+export async function getLatestVideos(count = 12): Promise<YtVideoItem[]> {
+  return (await getVideos(Math.max(count, 12))).slice(0, count);
+}
+
+/** The channel's playlists. */
+export async function getPlaylists(maxResults = 25): Promise<YtApiPlaylistList["items"]> {
+  const res = await ytData<YtApiPlaylistList>("playlists", { part: "snippet,contentDetails", mine: "true", maxResults: String(maxResults) });
+  return res.items ?? [];
+}
+
+/** Items of one playlist. */
+export async function getPlaylistItems(playlistId: string, maxResults = 25): Promise<NonNullable<YtApiPlaylistItemList["items"]>> {
+  const res = await ytData<YtApiPlaylistItemList>("playlistItems", {
+    part: "snippet,contentDetails",
+    playlistId,
+    maxResults: String(Math.min(maxResults, 50)),
+  });
+  return res.items ?? [];
+}
+
+/** One video by id (snippet + statistics). */
+export async function getVideo(videoId: string): Promise<YtVideoItem | null> {
+  const res = await ytData<YtApiVideoList>("videos", { part: "snippet,statistics", id: videoId });
+  const v = res.items?.[0];
+  return v ? toVideoItem(v) : null;
+}
+
+/**
+ * Search this channel's videos by query. NOTE: search.list costs 100 quota
+ * units per call — use sparingly (dashboards use the uploads playlist instead).
+ */
+export async function searchVideos(query: string, maxResults = 10): Promise<YtVideoItem[]> {
+  const ch = await getChannel();
+  const res = await ytData<YtApiSearchList>("search", {
+    part: "snippet",
+    q: query,
+    type: "video",
+    maxResults: String(Math.min(maxResults, 25)),
+    ...(ch?.id ? { channelId: ch.id } : {}),
+  });
+  const ids = (res.items ?? []).map((i) => i.id?.videoId).filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return [];
+  const vids = await ytData<YtApiVideoList>("videos", { part: "snippet,statistics", id: ids.join(",") });
+  return (vids.items ?? []).map(toVideoItem);
+}
+
+function toVideoItem(v: YtApiVideo): YtVideoItem {
+  return {
+    title: (v.snippet?.title ?? "").slice(0, 120),
+    url: v.id ? `https://www.youtube.com/watch?v=${v.id}` : null,
+    publishedAt: v.snippet?.publishedAt ?? null,
+    views: Number(v.statistics?.viewCount ?? 0),
+    likes: Number(v.statistics?.likeCount ?? 0),
+    comments: Number(v.statistics?.commentCount ?? 0),
+  };
+}
+
+/** Daily views/watch-time/subs/likes for the last 30 days (Analytics API). */
+async function getDailyAnalytics(): Promise<YtDailyPoint[]> {
+  const report = await ytAnalyticsReport<YtApiAnalyticsReport>({
+    startDate: isoDay(-30 * 86_400_000),
+    endDate: isoDay(),
+    metrics: "views,estimatedMinutesWatched,subscribersGained,likes",
+    dimensions: "day",
+    sort: "day",
+  });
+  return (report.rows ?? [])
+    .map((r) => ({
+      date: String(r[0] ?? ""),
+      views: Number(r[1] ?? 0),
+      minutesWatched: Number(r[2] ?? 0),
+      subsGained: Number(r[3] ?? 0),
+      likes: Number(r[4] ?? 0),
+    }))
+    .filter((p) => p.date)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ── Overview (interface unchanged — consumed by pages + CEO Command Center) ──
+
 export async function getYouTubeOverview(): Promise<YouTubeOverview> {
   return cached("youtube:overview", TTL.medium, buildOverview);
 }
@@ -109,52 +252,31 @@ async function buildOverview(): Promise<YouTubeOverview> {
     }).length,
   };
 
-  // ── Windsor analytics (optional, shared connector) ──
+  // ── Official YouTube APIs (OAuth) — each section degrades independently ──
   let channel: YtSection<YtChannelData>;
   let daily: YtSection<YtDailyData>;
   let videos: YtSection<YtVideosData>;
 
-  if (!windsorConfigured()) {
-    const reason = "Windsor.ai not connected (optional connector).";
+  if (!youtubeConfigured()) {
+    const reason = "YouTube OAuth not connected (set YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN).";
     channel = sec<YtChannelData>("NOT_CONFIGURED", null, reason);
     daily = sec<YtDailyData>("NOT_CONFIGURED", null, reason);
     videos = sec<YtVideosData>("NOT_CONFIGURED", null, reason);
   } else {
-    const [chRows, seriesRows, videoRows] = await Promise.all([
-      windsorQuery("youtube", ["channel_title", "subscriber_count", "view_count", "video_count"], { datePreset: "last_7d" }),
-      windsorQuery("youtube", ["date", "views", "estimated_minutes_watched", "subscribers_gained", "likes"], { datePreset: "last_30d" }),
-      windsorQuery("youtube", ["video_title", "videourl", "published_at", "video_view_count", "video_like_count", "video_comment_count"], { datePreset: "last_year" }),
-    ]);
+    const [chRes, dailyRes, videoRes] = await Promise.allSettled([getStatistics(), getDailyAnalytics(), getLatestVideos(12)]);
 
-    if (!chRows.ok) channel = sec<YtChannelData>("WAITING", null, chRows.reason);
+    if (chRes.status === "rejected") channel = sec<YtChannelData>("WAITING", null, failReason(chRes.reason));
     else {
-      const r = chRows.rows.find((x) => x.channel_title) ?? chRows.rows[0];
-      const health: YtChannelHealth | null = r
-        ? {
-            channelTitle: String(r.channel_title ?? ""),
-            subscribers: Number(r.subscriber_count ?? 0),
-            totalViews: Number(r.view_count ?? 0),
-            videosPublished: Number(r.video_count ?? 0),
-          }
-        : null;
+      const health = chRes.value;
       channel =
         health && (health.channelTitle || health.subscribers > 0 || health.videosPublished > 0)
           ? sec<YtChannelData>("LIVE", { health })
           : sec<YtChannelData>("WAITING", null, "No channel data returned yet.");
     }
 
-    if (!seriesRows.ok) daily = sec<YtDailyData>("WAITING", null, seriesRows.reason);
+    if (dailyRes.status === "rejected") daily = sec<YtDailyData>("WAITING", null, failReason(dailyRes.reason));
     else {
-      const pts: YtDailyPoint[] = seriesRows.rows
-        .map((r) => ({
-          date: String(r.date ?? ""),
-          views: Number(r.views ?? 0),
-          minutesWatched: Number(r.estimated_minutes_watched ?? 0),
-          subsGained: Number(r.subscribers_gained ?? 0),
-          likes: Number(r.likes ?? 0),
-        }))
-        .filter((p) => p.date)
-        .sort((a, b) => a.date.localeCompare(b.date));
+      const pts = dailyRes.value;
       const totals = pts.reduce(
         (t, p) => ({ views: t.views + p.views, minutesWatched: t.minutesWatched + p.minutesWatched, subsGained: t.subsGained + p.subsGained, likes: t.likes + p.likes }),
         { views: 0, minutesWatched: 0, subsGained: 0, likes: 0 },
@@ -165,22 +287,12 @@ async function buildOverview(): Promise<YouTubeOverview> {
         : sec<YtDailyData>("WAITING", null, "No analytics data returned yet.");
     }
 
-    if (!videoRows.ok) videos = sec<YtVideosData>("WAITING", null, videoRows.reason);
+    if (videoRes.status === "rejected") videos = sec<YtVideosData>("WAITING", null, failReason(videoRes.reason));
     else {
-      const list: YtVideoItem[] = videoRows.rows
-        .filter((r) => r.video_title)
-        .map((r) => ({
-          title: String(r.video_title ?? "").slice(0, 120),
-          url: r.videourl ? String(r.videourl) : null,
-          publishedAt: r.published_at ? String(r.published_at) : null,
-          views: Number(r.video_view_count ?? 0),
-          likes: Number(r.video_like_count ?? 0),
-          comments: Number(r.video_comment_count ?? 0),
-        }))
-        .sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""));
+      const list = videoRes.value;
       videos =
         list.length > 0
-          ? sec<YtVideosData>("LIVE", { items: list.slice(0, 12), lastPublishedAt: list[0]?.publishedAt ?? null })
+          ? sec<YtVideosData>("LIVE", { items: list, lastPublishedAt: list[0]?.publishedAt ?? null })
           : sec<YtVideosData>("WAITING", null, "No video data returned yet.");
     }
   }
@@ -201,7 +313,7 @@ async function buildOverview(): Promise<YouTubeOverview> {
     if (daysSince >= 7) recommendations.push({ priority: "high", title: `${daysSince} days since the last upload`, detail: "Consistency matters on YouTube — film and upload an approved plan." });
   }
   if (channel.status !== "LIVE") {
-    recommendations.push({ priority: "low", title: "Live analytics not connected", detail: "Channel health and performance activate via the optional Windsor.ai connector (Settings)." });
+    recommendations.push({ priority: "low", title: "Live analytics not connected", detail: "Channel health and performance activate via the official YouTube OAuth connection (Settings → YouTube)." });
   }
 
   return { channel, daily, videos, queue, recommendations };

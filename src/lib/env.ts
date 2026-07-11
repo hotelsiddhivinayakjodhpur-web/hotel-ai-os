@@ -81,6 +81,10 @@ const schema = z.object({
   GOOGLE_ADS_DEVELOPER_TOKEN: optionalStr,
   YOUTUBE_API_KEY: optionalStr,
   YOUTUBE_CHANNEL_ID: optionalStr,
+  // YouTube official OAuth (Data API v3 + Analytics API) — youtube-client.ts
+  YOUTUBE_CLIENT_ID: optionalStr,
+  YOUTUBE_CLIENT_SECRET: optionalStr,
+  YOUTUBE_REFRESH_TOKEN: optionalStr,
   // Meta (Business / Facebook / Instagram / Ads)
   META_BUSINESS_ID: optionalStr,
   FACEBOOK_PAGE_ID: optionalStr,

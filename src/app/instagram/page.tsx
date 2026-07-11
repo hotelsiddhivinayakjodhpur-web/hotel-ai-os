@@ -15,7 +15,7 @@ export default async function InstagramDashboard() {
     <div>
       <PageHeader
         title="Instagram AI"
-        subtitle="Adapts Content AI drafts into reels, stories and carousels — analytics via the optional Windsor connector"
+        subtitle="Adapts Content AI drafts into reels, stories and carousels — analytics via the official Instagram Graph API"
         action={<Pill tone={p.status === "LIVE" ? "ok" : "warn"}>{p.status === "LIVE" ? "Analytics live" : "Analytics waiting"}</Pill>}
       />
       <InstagramNav />

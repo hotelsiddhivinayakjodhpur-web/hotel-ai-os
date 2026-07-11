@@ -15,7 +15,7 @@ export default async function YouTubeDashboard() {
     <div>
       <PageHeader
         title="YouTube AI"
-        subtitle="Adapts Content AI drafts into shorts & videos — analytics via the optional Windsor connector"
+        subtitle="Adapts Content AI drafts into shorts & videos — analytics via the official YouTube Data & Analytics APIs"
         action={<Pill tone={ch.status === "LIVE" ? "ok" : "warn"}>{ch.status === "LIVE" ? "Analytics live" : "Analytics waiting"}</Pill>}
       />
       <YouTubeNav />
