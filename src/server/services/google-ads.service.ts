@@ -1,16 +1,23 @@
 import { cached, TTL } from "@/lib/cache";
-import { windsorConfigured, windsorQuery } from "@/server/integrations/windsor-client";
+import {
+  adsConfigured,
+  adsSearch,
+  AdsApiError,
+  duringClause,
+  fromMicros,
+  type AdsDatePreset,
+} from "@/server/integrations/google-ads-client";
 import { listContent } from "./content.service";
 
 /**
  * Google Ads AI — data layer. READ-ONLY by design: never creates or edits
  * campaigns; no Google Ads write API anywhere. Consumes:
- *  - Windsor.ai `google_ads` connector (OPTIONAL, shared marketing connector)
- *    for live campaign/performance data — every section degrades to
- *    "Waiting for Production Connection" honestly;
+ *  - The OFFICIAL Google Ads API (GAQL via google-ads-client; developer token +
+ *    OAuth through the MCC) — every section degrades to an honest reason;
  *  - Content AI (OFFER + FESTIVAL channels) as campaign-asset queue/calendar.
- * Field names verified against the live Windsor catalog (campaign,
- * campaign_status, clicks, impressions, cost, conversions, ctr, cpc…).
+ *
+ * All money fields arrive as micros and are converted once (fromMicros).
+ * Derived metrics (CTR, CPC, CPA, ROAS) are computed strictly from real sums.
  */
 export type AdsSectionStatus = "LIVE" | "WAITING" | "NOT_CONFIGURED";
 
@@ -23,11 +30,16 @@ export interface AdsSection<T> {
 export interface AdsCampaignRow {
   campaign: string;
   status: string;
+  budget: number; // daily budget (currency units)
   clicks: number;
   impressions: number;
   cost: number;
   conversions: number;
   conversionValue: number;
+  ctr: number | null;
+  avgCpc: number | null;
+  cpa: number | null;
+  roas: number | null;
 }
 
 export interface AdsDailyPoint {
@@ -48,6 +60,7 @@ export interface AdsTotals {
   ctr: number | null;
   avgCpc: number | null;
   costPerConversion: number | null;
+  roas: number | null;
 }
 
 export interface AdsCampaignsData {
@@ -56,6 +69,43 @@ export interface AdsCampaignsData {
 }
 export interface AdsDailyData {
   series: AdsDailyPoint[];
+}
+
+export interface AdsSearchTermRow {
+  term: string;
+  clicks: number;
+  impressions: number;
+  cost: number;
+}
+
+export interface AdsKeywordRow {
+  keyword: string;
+  matchType: string;
+  status: string;
+  clicks: number;
+  impressions: number;
+  cost: number;
+}
+
+export interface AdsAdGroupRow {
+  adGroup: string;
+  campaign: string;
+  status: string;
+}
+
+export interface AdsAssetRow {
+  id: string;
+  type: string;
+}
+
+export interface AdsApiRecommendationRow {
+  type: string;
+}
+
+export interface AdsConversionActionRow {
+  name: string;
+  status: string;
+  category: string;
 }
 
 export interface AdsQueueStats {
@@ -75,6 +125,8 @@ export interface AdsRecommendation {
 export interface GoogleAdsOverview {
   campaigns: AdsSection<AdsCampaignsData>;
   daily: AdsSection<AdsDailyData>;
+  searchTerms: AdsSection<AdsSearchTermRow[]>;
+  apiRecommendations: AdsSection<AdsApiRecommendationRow[]>;
   queue: AdsQueueStats;
   recommendations: AdsRecommendation[];
 }
@@ -82,6 +134,163 @@ export interface GoogleAdsOverview {
 function sec<T>(status: AdsSectionStatus, data: T | null, reason?: string): AdsSection<T> {
   return { status, data, reason };
 }
+
+function failReason(e: unknown): string {
+  return e instanceof AdsApiError ? e.reason : e instanceof Error ? e.message : String(e);
+}
+
+// ── Reusable service methods (official API; all read-only GAQL) ─────────────
+// Each accepts a date preset so callers get Today / Yesterday / Last 7 Days /
+// Last 30 Days / This Month / Last Month without new queries being written.
+
+interface GaqlCampaignRow {
+  campaign?: { id?: string; name?: string; status?: string };
+  campaignBudget?: { amountMicros?: string };
+  metrics?: {
+    clicks?: string;
+    impressions?: string;
+    costMicros?: string;
+    conversions?: number;
+    conversionsValue?: number;
+  };
+}
+
+export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsCampaignsData> {
+  const rows = (await adsSearch(
+    `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros,
+            metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions, metrics.conversions_value
+     FROM campaign WHERE ${duringClause(preset)} ORDER BY metrics.cost_micros DESC`,
+  )) as GaqlCampaignRow[];
+
+  const mapped: AdsCampaignRow[] = rows
+    .filter((r) => r.campaign?.name)
+    .map((r) => {
+      const clicks = Number(r.metrics?.clicks ?? 0);
+      const impressions = Number(r.metrics?.impressions ?? 0);
+      const cost = fromMicros(r.metrics?.costMicros);
+      const conversions = Number(r.metrics?.conversions ?? 0);
+      const conversionValue = Number(r.metrics?.conversionsValue ?? 0);
+      return {
+        campaign: r.campaign!.name!,
+        status: r.campaign?.status ?? "",
+        budget: fromMicros(r.campaignBudget?.amountMicros),
+        clicks,
+        impressions,
+        cost,
+        conversions,
+        conversionValue,
+        ctr: impressions > 0 ? clicks / impressions : null,
+        avgCpc: clicks > 0 ? cost / clicks : null,
+        cpa: conversions > 0 ? cost / conversions : null,
+        roas: cost > 0 && conversionValue > 0 ? conversionValue / cost : null,
+      };
+    });
+
+  const sum = mapped.reduce(
+    (t, r) => ({
+      clicks: t.clicks + r.clicks,
+      impressions: t.impressions + r.impressions,
+      cost: t.cost + r.cost,
+      conversions: t.conversions + r.conversions,
+      conversionValue: t.conversionValue + r.conversionValue,
+    }),
+    { clicks: 0, impressions: 0, cost: 0, conversions: 0, conversionValue: 0 },
+  );
+  const totals: AdsTotals = {
+    ...sum,
+    ctr: sum.impressions > 0 ? sum.clicks / sum.impressions : null,
+    avgCpc: sum.clicks > 0 ? sum.cost / sum.clicks : null,
+    costPerConversion: sum.conversions > 0 ? sum.cost / sum.conversions : null,
+    roas: sum.cost > 0 && sum.conversionValue > 0 ? sum.conversionValue / sum.cost : null,
+  };
+  return { rows: mapped.slice(0, 20), totals };
+}
+
+interface GaqlDailyRow {
+  segments?: { date?: string };
+  metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number };
+}
+
+export async function getDailySeries(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsDailyPoint[]> {
+  const rows = (await adsSearch(
+    `SELECT segments.date, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions
+     FROM customer WHERE ${duringClause(preset)} ORDER BY segments.date`,
+  )) as GaqlDailyRow[];
+  return rows
+    .filter((r) => r.segments?.date)
+    .map((r) => ({
+      date: r.segments!.date!,
+      clicks: Number(r.metrics?.clicks ?? 0),
+      impressions: Number(r.metrics?.impressions ?? 0),
+      cost: fromMicros(r.metrics?.costMicros),
+      conversions: Number(r.metrics?.conversions ?? 0),
+    }));
+}
+
+export async function getPerformanceTotals(preset: AdsDatePreset): Promise<AdsTotals> {
+  return (await getCampaigns(preset)).totals;
+}
+
+export async function getAdGroups(): Promise<AdsAdGroupRow[]> {
+  const rows = (await adsSearch(
+    "SELECT ad_group.name, ad_group.status, campaign.name FROM ad_group ORDER BY campaign.name LIMIT 50",
+  )) as { adGroup?: { name?: string; status?: string }; campaign?: { name?: string } }[];
+  return rows.map((r) => ({ adGroup: r.adGroup?.name ?? "", campaign: r.campaign?.name ?? "", status: r.adGroup?.status ?? "" }));
+}
+
+export async function getKeywords(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsKeywordRow[]> {
+  const rows = (await adsSearch(
+    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+            metrics.clicks, metrics.impressions, metrics.cost_micros
+     FROM keyword_view WHERE ${duringClause(preset)} ORDER BY metrics.clicks DESC LIMIT 50`,
+  )) as { adGroupCriterion?: { keyword?: { text?: string; matchType?: string }; status?: string }; metrics?: { clicks?: string; impressions?: string; costMicros?: string } }[];
+  return rows
+    .filter((r) => r.adGroupCriterion?.keyword?.text)
+    .map((r) => ({
+      keyword: r.adGroupCriterion!.keyword!.text!,
+      matchType: r.adGroupCriterion?.keyword?.matchType ?? "",
+      status: r.adGroupCriterion?.status ?? "",
+      clicks: Number(r.metrics?.clicks ?? 0),
+      impressions: Number(r.metrics?.impressions ?? 0),
+      cost: fromMicros(r.metrics?.costMicros),
+    }));
+}
+
+export async function getSearchTerms(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsSearchTermRow[]> {
+  const rows = (await adsSearch(
+    `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions, metrics.cost_micros
+     FROM search_term_view WHERE ${duringClause(preset)} ORDER BY metrics.clicks DESC LIMIT 25`,
+  )) as { searchTermView?: { searchTerm?: string }; metrics?: { clicks?: string; impressions?: string; costMicros?: string } }[];
+  return rows
+    .filter((r) => r.searchTermView?.searchTerm)
+    .map((r) => ({
+      term: r.searchTermView!.searchTerm!,
+      clicks: Number(r.metrics?.clicks ?? 0),
+      impressions: Number(r.metrics?.impressions ?? 0),
+      cost: fromMicros(r.metrics?.costMicros),
+    }));
+}
+
+export async function getAssets(): Promise<AdsAssetRow[]> {
+  const rows = (await adsSearch("SELECT asset.id, asset.type FROM asset LIMIT 50")) as { asset?: { id?: string; type?: string } }[];
+  return rows.filter((r) => r.asset?.id).map((r) => ({ id: String(r.asset!.id), type: r.asset?.type ?? "" }));
+}
+
+export async function getApiRecommendations(): Promise<AdsApiRecommendationRow[]> {
+  const rows = (await adsSearch("SELECT recommendation.type FROM recommendation LIMIT 25")) as { recommendation?: { type?: string } }[];
+  return rows.filter((r) => r.recommendation?.type).map((r) => ({ type: r.recommendation!.type! }));
+}
+
+export async function getConversionActions(): Promise<AdsConversionActionRow[]> {
+  const rows = (await adsSearch(
+    "SELECT conversion_action.name, conversion_action.status, conversion_action.category FROM conversion_action LIMIT 25",
+  )) as { conversionAction?: { name?: string; status?: string; category?: string } }[];
+  return rows
+    .filter((r) => r.conversionAction?.name)
+    .map((r) => ({ name: r.conversionAction!.name!, status: r.conversionAction?.status ?? "", category: r.conversionAction?.category ?? "" }));
+}
+
+// ── Overview (interface consumed by pages + CEO Command Center) ─────────────
 
 export async function getGoogleAdsOverview(): Promise<GoogleAdsOverview> {
   return cached("google-ads:overview", TTL.medium, buildOverview);
@@ -108,90 +317,57 @@ async function buildOverview(): Promise<GoogleAdsOverview> {
     scheduledNext30d: scheduled.length,
   };
 
-  // ── Windsor analytics (optional, read-only) ──
+  // ── Official Google Ads API — each section degrades independently ──
   let campaigns: AdsSection<AdsCampaignsData>;
   let daily: AdsSection<AdsDailyData>;
+  let searchTerms: AdsSection<AdsSearchTermRow[]>;
+  let apiRecommendations: AdsSection<AdsApiRecommendationRow[]>;
 
-  if (!windsorConfigured()) {
-    const reason = "Windsor.ai not connected (optional connector).";
+  if (!adsConfigured()) {
+    const reason = "Google Ads API not connected (set GOOGLE_ADS_* env vars).";
     campaigns = sec<AdsCampaignsData>("NOT_CONFIGURED", null, reason);
     daily = sec<AdsDailyData>("NOT_CONFIGURED", null, reason);
+    searchTerms = sec<AdsSearchTermRow[]>("NOT_CONFIGURED", null, reason);
+    apiRecommendations = sec<AdsApiRecommendationRow[]>("NOT_CONFIGURED", null, reason);
   } else {
-    const [campRows, seriesRows] = await Promise.all([
-      windsorQuery("google_ads", ["campaign", "campaign_status", "clicks", "impressions", "cost", "conversions", "conversion_value"], { datePreset: "last_30d" }),
-      windsorQuery("google_ads", ["date", "clicks", "impressions", "cost", "conversions"], { datePreset: "last_30d" }),
+    const [campRes, dailyRes, termsRes, recsRes] = await Promise.allSettled([
+      getCampaigns("LAST_30_DAYS"),
+      getDailySeries("LAST_30_DAYS"),
+      getSearchTerms("LAST_30_DAYS"),
+      getApiRecommendations(),
     ]);
 
-    if (!campRows.ok) campaigns = sec<AdsCampaignsData>("WAITING", null, campRows.reason);
-    else {
-      // Aggregate rows per campaign (Windsor may return per-day rows).
-      const byName = new Map<string, AdsCampaignRow>();
-      for (const r of campRows.rows) {
-        const name = String(r.campaign ?? "").trim();
-        if (!name) continue;
-        const cur = byName.get(name) ?? {
-          campaign: name,
-          status: String(r.campaign_status ?? ""),
-          clicks: 0,
-          impressions: 0,
-          cost: 0,
-          conversions: 0,
-          conversionValue: 0,
-        };
-        cur.clicks += Number(r.clicks ?? 0);
-        cur.impressions += Number(r.impressions ?? 0);
-        cur.cost += Number(r.cost ?? 0);
-        cur.conversions += Number(r.conversions ?? 0);
-        cur.conversionValue += Number(r.conversion_value ?? 0);
-        if (r.campaign_status) cur.status = String(r.campaign_status);
-        byName.set(name, cur);
-      }
-      const rows = [...byName.values()].sort((a, b) => b.cost - a.cost);
-      const sum = rows.reduce(
-        (t, r) => ({
-          clicks: t.clicks + r.clicks,
-          impressions: t.impressions + r.impressions,
-          cost: t.cost + r.cost,
-          conversions: t.conversions + r.conversions,
-          conversionValue: t.conversionValue + r.conversionValue,
-        }),
-        { clicks: 0, impressions: 0, cost: 0, conversions: 0, conversionValue: 0 },
-      );
-      const totals: AdsTotals = {
-        ...sum,
-        ctr: sum.impressions > 0 ? sum.clicks / sum.impressions : null,
-        avgCpc: sum.clicks > 0 ? sum.cost / sum.clicks : null,
-        costPerConversion: sum.conversions > 0 ? sum.cost / sum.conversions : null,
-      };
+    if (campRes.status === "rejected") campaigns = sec<AdsCampaignsData>("WAITING", null, failReason(campRes.reason));
+    else
       campaigns =
-        rows.length > 0
-          ? sec<AdsCampaignsData>("LIVE", { rows: rows.slice(0, 20), totals })
+        campRes.value.rows.length > 0
+          ? sec<AdsCampaignsData>("LIVE", campRes.value)
           : sec<AdsCampaignsData>("WAITING", null, "No campaign data returned yet (account may have no active campaigns).");
-    }
 
-    if (!seriesRows.ok) daily = sec<AdsDailyData>("WAITING", null, seriesRows.reason);
+    if (dailyRes.status === "rejected") daily = sec<AdsDailyData>("WAITING", null, failReason(dailyRes.reason));
     else {
-      const pts: AdsDailyPoint[] = seriesRows.rows
-        .map((r) => ({
-          date: String(r.date ?? ""),
-          clicks: Number(r.clicks ?? 0),
-          impressions: Number(r.impressions ?? 0),
-          cost: Number(r.cost ?? 0),
-          conversions: Number(r.conversions ?? 0),
-        }))
-        .filter((p) => p.date)
-        .sort((a, b) => a.date.localeCompare(b.date));
+      const pts = dailyRes.value;
       const hasSignal = pts.length > 1 || pts.some((p) => p.impressions + p.clicks > 0);
       daily = hasSignal
         ? sec<AdsDailyData>("LIVE", { series: pts })
-        : sec<AdsDailyData>("WAITING", null, "No daily performance data returned yet.");
+        : sec<AdsDailyData>("WAITING", null, "No daily performance recorded in this window (no recent spend).");
     }
+
+    if (termsRes.status === "rejected") searchTerms = sec<AdsSearchTermRow[]>("WAITING", null, failReason(termsRes.reason));
+    else
+      searchTerms =
+        termsRes.value.length > 0
+          ? sec<AdsSearchTermRow[]>("LIVE", termsRes.value)
+          : sec<AdsSearchTermRow[]>("WAITING", null, "No search terms recorded in this window.");
+
+    if (recsRes.status === "rejected") apiRecommendations = sec<AdsApiRecommendationRow[]>("WAITING", null, failReason(recsRes.reason));
+    else apiRecommendations = sec<AdsApiRecommendationRow[]>("LIVE", recsRes.value);
   }
 
   // ── Recommendations (rule-based from real signals only) ──
   const recommendations: AdsRecommendation[] = [];
   if (campaigns.status !== "LIVE") {
-    recommendations.push({ priority: "low", title: "Live campaign data not connected", detail: "The campaign and performance dashboards activate via the optional Windsor.ai connector (Settings)." });
+    recommendations.push({ priority: "low", title: "Live campaign data not connected", detail: "Campaign and performance dashboards activate via the official Google Ads API (Settings → Google Ads)." });
   }
   if (campaigns.status === "LIVE" && campaigns.data) {
     const zeroConv = campaigns.data.rows.filter((r) => r.cost > 0 && r.conversions === 0);
@@ -202,6 +378,9 @@ async function buildOverview(): Promise<GoogleAdsOverview> {
       recommendations.push({ priority: "high", title: "Spend recorded but no conversions tracked", detail: "Verify the GA4 booking key-event is imported into Google Ads before optimising anything." });
     }
   }
+  if (apiRecommendations.status === "LIVE" && (apiRecommendations.data?.length ?? 0) > 0) {
+    recommendations.push({ priority: "medium", title: `${apiRecommendations.data!.length} Google-generated recommendation(s) pending`, detail: "Review them in the Google Ads console — apply only what fits the hotel's strategy (this system never auto-applies)." });
+  }
   if (queue.offerApproved + queue.festivalApproved === 0) {
     recommendations.push({ priority: "medium", title: "No approved offers or festival content", detail: "Ads need substance — create and approve an Offer or Festival draft in Content AI to anchor a campaign." });
   }
@@ -209,5 +388,5 @@ async function buildOverview(): Promise<GoogleAdsOverview> {
     recommendations.push({ priority: "medium", title: "No campaign-worthy content scheduled (30d)", detail: "Schedule offers/festival content so campaigns and organic posts launch together." });
   }
 
-  return { campaigns, daily, queue, recommendations };
+  return { campaigns, daily, searchTerms, apiRecommendations, queue, recommendations };
 }

@@ -24,7 +24,7 @@ export default async function GoogleAdsDashboard() {
       {/* Connection Status */}
       <Section title="Connection Status">
         <div className="grid gap-4 md:grid-cols-3">
-          <StatusCard name="Windsor Google Ads (optional)" ok={c.status === "LIVE"} detail={c.status === "LIVE" ? "Delivering data" : (c.reason ?? "Not connected")} />
+          <StatusCard name="Google Ads API (official, via MCC)" ok={c.status === "LIVE"} detail={c.status === "LIVE" ? "Delivering data" : (c.reason ?? "Not connected")} />
           <StatusCard name="Content AI (offers & festivals)" ok detail="Campaign-asset source · ContentItem" />
           <StatusCard name="Google Ads write API" ok={false} detail="Intentionally never used — read-only architecture" />
         </div>

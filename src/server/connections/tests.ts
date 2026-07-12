@@ -7,6 +7,7 @@ import { gscStatus } from "@/server/integrations/gsc-client";
 import { ga4Status } from "@/server/integrations/ga4-client";
 import { youtubeConfigured, ytData, YouTubeApiError } from "@/server/integrations/youtube-client";
 import { fbConfigured, igConfigured, graphGet, graphPageGet, MetaApiError } from "@/server/integrations/meta-graph-client";
+import { adsConfigured, adsSearch, AdsApiError } from "@/server/integrations/google-ads-client";
 import type { ConnectionTestResult } from "./types";
 
 /**
@@ -97,6 +98,24 @@ export const CONNECTION_TESTS: Record<string, () => Promise<ConnectionTestResult
       const msg = e instanceof Error ? e.message : String(e);
       if (/token refresh failed|invalid_grant|\b400\b/i.test(msg)) return fail("TOKEN_EXPIRED", msg);
       return fail("ERROR", msg);
+    }
+  },
+
+  "google-ads": async () => {
+    if (!adsConfigured()) return fail("NOT_CONFIGURED", "GOOGLE_ADS_* env vars not set.");
+    try {
+      const rows = await adsSearch("SELECT customer.id, customer.descriptive_name, customer.currency_code FROM customer LIMIT 1");
+      const c = (rows[0]?.customer ?? {}) as { id?: string; descriptiveName?: string; currencyCode?: string };
+      if (!c.id) return fail("PERMISSION_DENIED", "Authenticated but no customer returned.");
+      return ok(`${c.descriptiveName ?? "Account"} (${c.id}) · ${c.currencyCode ?? ""}`);
+    } catch (e) {
+      if (e instanceof AdsApiError) {
+        if (e.status === 401) return fail("TOKEN_EXPIRED", e.reason);
+        if (e.status === 403) return fail("PERMISSION_DENIED", e.reason);
+        if (e.status === 429) return fail("RATE_LIMITED", e.reason);
+        return fail("ERROR", e.reason);
+      }
+      return fail("ERROR", e instanceof Error ? e.message : String(e));
     }
   },
 

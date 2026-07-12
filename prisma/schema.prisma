@@ -39,14 +39,14 @@ model ApiCallLog {
 /// Inbound Stayflexi booking webhooks. Stayflexi delivers at-least-once with NO
 /// signature, so we dedupe on (bookingId, bookingStatus) and keep the raw body.
 model WebhookEvent {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   bookingId     String
   bookingStatus String // CREATED | MODIFIED | CANCELLED
   hotelId       String?
   payload       Json
-  processed      Boolean  @default(false)
-  processedAt    DateTime?
-  receivedAt     DateTime @default(now())
+  processed     Boolean   @default(false)
+  processedAt   DateTime?
+  receivedAt    DateTime  @default(now())
 
   @@unique([bookingId, bookingStatus], name: "booking_status_dedupe")
   @@index([hotelId, receivedAt])
@@ -104,22 +104,22 @@ enum TaskStatus {
 
 /// One of the four Phase-1 departments, modelled as an autonomous agent.
 model Agent {
-  id             String      @id @default(cuid())
-  kind           AgentKind   @unique
-  name           String
-  mission        String
-  status         AgentStatus @default(IDLE)
-  health         Int         @default(100) // 0-100
-  lastRunAt      DateTime?
-  nextRunAt      DateTime?
-  currentTaskId  String?
-  enabled        Boolean     @default(true)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id            String      @id @default(cuid())
+  kind          AgentKind   @unique
+  name          String
+  mission       String
+  status        AgentStatus @default(IDLE)
+  health        Int         @default(100) // 0-100
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+  currentTaskId String?
+  enabled       Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
-  tasks   AgentTask[]
-  logs    AgentLog[]
-  memory  AgentMemory[]
+  tasks  AgentTask[]
+  logs   AgentLog[]
+  memory AgentMemory[]
 }
 
 /// Work item in an agent's queue / execution history.
@@ -172,21 +172,21 @@ model AgentMemory {
 
 /// Daily snapshot of the headline KPIs the CEO dashboard renders.
 model MetricSnapshot {
-  id              String   @id @default(cuid())
-  hotelId         String
-  date            DateTime // the business date this snapshot describes
-  occupancy       Float? // 0-1
-  adr             Float? // average daily rate
-  revpar          Float? // revenue per available room
-  roomsSold       Int?
-  roomsAvailable  Int?
-  directRevenue   Float?
-  otaRevenue      Float?
-  cancellations   Int?
-  bookingPace     Float? // bookings vs same-time-last-period
-  healthScore     Int? // 0-100 composite
-  source          String   @default("stayflexi")
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  hotelId        String
+  date           DateTime // the business date this snapshot describes
+  occupancy      Float? // 0-1
+  adr            Float? // average daily rate
+  revpar         Float? // revenue per available room
+  roomsSold      Int?
+  roomsAvailable Int?
+  directRevenue  Float?
+  otaRevenue     Float?
+  cancellations  Int?
+  bookingPace    Float? // bookings vs same-time-last-period
+  healthScore    Int? // 0-100 composite
+  source         String   @default("stayflexi")
+  createdAt      DateTime @default(now())
 
   @@unique([hotelId, date, source])
   @@index([hotelId, date])
@@ -237,32 +237,32 @@ model Briefing {
 
 /// Parsed Night Audit report (one per hotel per business date).
 model NightAuditReport {
-  id             String   @id @default(cuid())
-  hotelId        String
-  businessDate   DateTime // the date the report describes
+  id              String    @id @default(cuid())
+  hotelId         String
+  businessDate    DateTime // the date the report describes
   // headline KPIs (today)
-  roomsSold      Int?
-  roomsAvailable Int?
-  occupancy      Float? // 0-1
-  adr            Float?
-  revpar         Float?
-  roomRevenue    Float?
-  posRevenue     Float?
+  roomsSold       Int?
+  roomsAvailable  Int?
+  occupancy       Float? // 0-1
+  adr             Float?
+  revpar          Float?
+  roomRevenue     Float?
+  posRevenue      Float?
   servicesRevenue Float?
-  totalPayments  Float?
-  arrivals       Int?
-  departures     Int?
+  totalPayments   Float?
+  arrivals        Int?
+  departures      Int?
   // structured detail kept verbatim for transparency / re-parsing
-  payments       Json? // payment-method breakdown
-  monthToDate    Json? // month's performance block
-  forecast       Json?
-  raw            Json? // full parsed object
-  currency       String   @default("INR")
-  source         String   @default("gmail") // gmail | stayflexi-api
-  messageId      String? // Gmail message id (provenance)
-  reportDate     DateTime? // when the email was sent
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  payments        Json? // payment-method breakdown
+  monthToDate     Json? // month's performance block
+  forecast        Json?
+  raw             Json? // full parsed object
+  currency        String    @default("INR")
+  source          String    @default("gmail") // gmail | stayflexi-api
+  messageId       String? // Gmail message id (provenance)
+  reportDate      DateTime? // when the email was sent
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   revenueSources RevenueSource[]
   roomRevenues   RoomRevenue[]
@@ -273,20 +273,20 @@ model NightAuditReport {
 
 /// Parsed Daily Intelligence report (occupancy/revenue/pickup/market).
 model DailyIntelligenceReport {
-  id             String   @id @default(cuid())
-  hotelId        String
-  businessDate   DateTime
-  occupancy      Float?
-  revenue        Float?
-  pickup         Float? // net pickup (rooms or revenue per report)
-  bookingWindow  Float? // avg lead time (days)
-  marketIntel    Json?
-  raw            Json?
-  source         String   @default("gmail")
-  messageId      String?
-  reportDate     DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String    @id @default(cuid())
+  hotelId       String
+  businessDate  DateTime
+  occupancy     Float?
+  revenue       Float?
+  pickup        Float? // net pickup (rooms or revenue per report)
+  bookingWindow Float? // avg lead time (days)
+  marketIntel   Json?
+  raw           Json?
+  source        String    @default("gmail")
+  messageId     String?
+  reportDate    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   pickupSources PickupSource[]
   forecasts     DailyForecast[]
@@ -297,22 +297,22 @@ model DailyIntelligenceReport {
 
 /// Revenue broken down by booking source (OTA, direct, walk-in, …).
 model RevenueSource {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   hotelId      String
   businessDate DateTime
   source       String // AGODA | BOOKING.COM | WALK-IN | STAYFLEXI_OD | ...
   amount       Float
-  scope        String   @default("today") // today | mtd
+  scope        String            @default("today") // today | mtd
   nightAudit   NightAuditReport? @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
   nightAuditId String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime          @default(now())
 
   @@index([hotelId, businessDate])
 }
 
 /// Revenue + rooms sold broken down by room type.
 model RoomRevenue {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   hotelId      String
   businessDate DateTime
   roomType     String
@@ -320,29 +320,29 @@ model RoomRevenue {
   roomsSold    Int?
   nightAudit   NightAuditReport? @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
   nightAuditId String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime          @default(now())
 
   @@index([hotelId, businessDate])
 }
 
 /// Pickup (new bookings) by source.
 model PickupSource {
-  id           String   @id @default(cuid())
-  hotelId      String
-  businessDate DateTime
-  source       String
-  rooms        Int?
-  revenue      Float?
-  dailyReport  DailyIntelligenceReport? @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  id            String                   @id @default(cuid())
+  hotelId       String
+  businessDate  DateTime
+  source        String
+  rooms         Int?
+  revenue       Float?
+  dailyReport   DailyIntelligenceReport? @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
   dailyReportId String?
-  createdAt    DateTime @default(now())
+  createdAt     DateTime                 @default(now())
 
   @@index([hotelId, businessDate])
 }
 
 /// Forward-looking occupancy/revenue forecast rows.
 model DailyForecast {
-  id            String   @id @default(cuid())
+  id            String                   @id @default(cuid())
   hotelId       String
   businessDate  DateTime // date the forecast was generated
   forecastDate  DateTime // date being forecast
@@ -351,7 +351,7 @@ model DailyForecast {
   roomsForecast Int?
   dailyReport   DailyIntelligenceReport? @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
   dailyReportId String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime                 @default(now())
 
   @@index([hotelId, forecastDate])
 }
@@ -366,18 +366,18 @@ enum EmailProcessingStatus {
 /// Run-level monitoring for the Gmail sync (one row per sync attempt). Powers
 /// the Gmail health endpoint: last success/failure, duration, counts.
 model GmailSyncLog {
-  id          String    @id @default(cuid())
-  trigger     String    @default("cron") // cron | manual | api
-  status      String // SUCCESS | PARTIAL | FAILED | SKIPPED
-  scanned     Int       @default(0)
-  ingested    Int       @default(0)
-  duplicates  Int       @default(0)
-  failures    Int       @default(0)
-  durationMs  Int       @default(0)
-  error       String?
-  note        String?
-  startedAt   DateTime  @default(now())
-  finishedAt  DateTime?
+  id         String    @id @default(cuid())
+  trigger    String    @default("cron") // cron | manual | api
+  status     String // SUCCESS | PARTIAL | FAILED | SKIPPED
+  scanned    Int       @default(0)
+  ingested   Int       @default(0)
+  duplicates Int       @default(0)
+  failures   Int       @default(0)
+  durationMs Int       @default(0)
+  error      String?
+  note       String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
 
   @@index([status, startedAt])
   @@index([startedAt])
@@ -420,36 +420,67 @@ model CompetitorNote {
 /// Credentials themselves live ONLY in environment variables and are never
 /// stored here.
 model ConnectionState {
-  id             String    @id @default(cuid())
-  connectionId   String    @unique // matches the registry id (e.g. "ga4")
-  enabled        Boolean   @default(true) // false = user Disconnected it
-  manualStatus   String? // optional override: APP_REVIEW | PERMISSION_DENIED | ...
-  lastStatus     String? // last computed/tested status
-  lastError      String?
-  lastTestAt     DateTime?
-  lastSyncAt     DateTime?
-  metadata       Json? // non-secret extras (account id, plan, etc.)
-  updatedAt      DateTime  @updatedAt
-  createdAt      DateTime  @default(now())
+  id           String    @id @default(cuid())
+  connectionId String    @unique // matches the registry id (e.g. "ga4")
+  enabled      Boolean   @default(true) // false = user Disconnected it
+  manualStatus String? // optional override: APP_REVIEW | PERMISSION_DENIED | ...
+  lastStatus   String? // last computed/tested status
+  lastError    String?
+  lastTestAt   DateTime?
+  lastSyncAt   DateTime?
+  metadata     Json? // non-secret extras (account id, plan, etc.)
+  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime  @default(now())
 }
 
 /// Audit log of every email/report processed (idempotency + observability).
 model EmailProcessingLog {
-  id            String                @id @default(cuid())
-  hotelId       String?
-  messageId     String? // Gmail message id
-  reportType    String // NIGHT_AUDIT | DAILY_INTELLIGENCE | UNKNOWN
-  status        EmailProcessingStatus
-  source        String                @default("gmail")
-  subject       String?
-  fromAddress   String?
-  attachments   Json? // filenames seen
-  fieldsParsed  Int                   @default(0)
-  error         String?
-  attempt       Int                   @default(1)
-  createdAt     DateTime              @default(now())
+  id           String                @id @default(cuid())
+  hotelId      String?
+  messageId    String? // Gmail message id
+  reportType   String // NIGHT_AUDIT | DAILY_INTELLIGENCE | UNKNOWN
+  status       EmailProcessingStatus
+  source       String                @default("gmail")
+  subject      String?
+  fromAddress  String?
+  attachments  Json? // filenames seen
+  fieldsParsed Int                   @default(0)
+  error        String?
+  attempt      Int                   @default(1)
+  createdAt    DateTime              @default(now())
 
   @@unique([messageId, reportType])
   @@index([hotelId, createdAt])
   @@index([status, createdAt])
+}
+
+/// Daily account-level Google Ads performance snapshot (official API sync).
+/// One row per date; the daily cron upserts the trailing 35 days so late
+/// conversion attribution is captured incrementally.
+model GoogleAdsDaily {
+  id               String   @id @default(cuid())
+  date             DateTime @unique @db.Date
+  clicks           Int      @default(0)
+  impressions      Int      @default(0)
+  costMicros       BigInt   @default(0)
+  conversions      Float    @default(0)
+  conversionsValue Float    @default(0)
+  syncedAt         DateTime @default(now())
+
+  @@index([date])
+}
+
+/// Run-level monitoring for the Google Ads sync (one row per attempt) —
+/// same pattern as GmailSyncLog.
+model GoogleAdsSyncLog {
+  id         String    @id @default(cuid())
+  trigger    String    @default("cron") // cron | manual
+  status     String // SUCCESS | FAILED | SKIPPED
+  upserted   Int       @default(0)
+  durationMs Int       @default(0)
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([status, startedAt])
 }

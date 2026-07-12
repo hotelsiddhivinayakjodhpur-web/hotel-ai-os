@@ -79,6 +79,11 @@ const schema = z.object({
   GBP_ACCOUNT_ID: optionalStr,
   GOOGLE_ADS_CUSTOMER_ID: optionalStr,
   GOOGLE_ADS_DEVELOPER_TOKEN: optionalStr,
+  // Google Ads official API OAuth (google-ads-client.ts)
+  GOOGLE_ADS_CLIENT_ID: optionalStr,
+  GOOGLE_ADS_CLIENT_SECRET: optionalStr,
+  GOOGLE_ADS_REFRESH_TOKEN: optionalStr,
+  GOOGLE_ADS_LOGIN_CUSTOMER_ID: optionalStr,
   YOUTUBE_API_KEY: optionalStr,
   YOUTUBE_CHANNEL_ID: optionalStr,
   // YouTube official OAuth (Data API v3 + Analytics API) — youtube-client.ts
