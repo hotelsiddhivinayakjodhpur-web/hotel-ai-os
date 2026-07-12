@@ -34,15 +34,3 @@ export function validateRuntimeEnv(): RuntimeValidation {
   return { ok: missingRequired.length === 0, missingRequired, checks };
 }
 
-/**
- * Build a human-readable startup error string. Used by the health endpoint and
- * (optionally) thrown in scripts that REQUIRE full configuration.
- */
-export function runtimeEnvError(): string | null {
-  const v = validateRuntimeEnv();
-  if (v.ok) return null;
-  const lines = v.checks
-    .filter((c) => c.required && !c.present)
-    .map((c) => `  ✗ ${c.key} — ${c.hint}`);
-  return `Configuration incomplete. Missing required environment:\n${lines.join("\n")}`;
-}

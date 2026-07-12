@@ -76,6 +76,7 @@ const schema = z.object({
   // ── Marketing / AI platform credentials (all optional; read via the
   //    Settings & Connections registry — never hardcoded). Unset = NOT_CONFIGURED.
   // Google Business Profile / Ads / YouTube
+  // Reserved for the official GBP API migration (pending Google approval).
   GBP_ACCOUNT_ID: optionalStr,
   GOOGLE_ADS_CUSTOMER_ID: optionalStr,
   GOOGLE_ADS_DEVELOPER_TOKEN: optionalStr,
@@ -84,7 +85,6 @@ const schema = z.object({
   GOOGLE_ADS_CLIENT_SECRET: optionalStr,
   GOOGLE_ADS_REFRESH_TOKEN: optionalStr,
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: optionalStr,
-  YOUTUBE_API_KEY: optionalStr,
   YOUTUBE_CHANNEL_ID: optionalStr,
   // YouTube official OAuth (Data API v3 + Analytics API) — youtube-client.ts
   YOUTUBE_CLIENT_ID: optionalStr,

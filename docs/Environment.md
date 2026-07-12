@@ -35,3 +35,21 @@ checked by `src/lib/runtime-validation.ts` and surfaced in the UI banner and
   their secret is unset (open only in development for convenience).
 - The Stayflexi variables are intentionally blank; the SDK stays dormant and the
   CEO dashboard shows "Waiting for Stayflexi Production Credentials".
+
+## Official marketing API credentials (added during the Windsor→first-party migrations)
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` / `YOUTUBE_REFRESH_TOKEN` | YouTube AI | OAuth (scopes: youtube.readonly + yt-analytics.readonly). No API key is used. |
+| `META_ACCESS_TOKEN` | Facebook AI, Instagram AI, Meta Ads AI | One long-lived (never-expiring) token, 11 scopes incl. ads_read. |
+| `FACEBOOK_PAGE_ID` / `INSTAGRAM_BUSINESS_ID` / `META_ADS_ACCOUNT_ID` | Meta departments | Non-secret asset ids. |
+| `FACEBOOK_ACCESS_TOKEN` | Facebook AI (optional) | Page token; derived at runtime from META_ACCESS_TOKEN when unset. |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` / `GOOGLE_ADS_CLIENT_ID` / `GOOGLE_ADS_CLIENT_SECRET` / `GOOGLE_ADS_REFRESH_TOKEN` | Google Ads AI | Official API via the MCC. |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` / `GOOGLE_ADS_CUSTOMER_ID` | Google Ads AI | MCC and client account ids (digits only). |
+| `WINDSOR_API_KEY` | GBP only | Windsor is isolated to Google Business Profile until official GBP API approval. |
+| `GBP_ACCOUNT_ID` | (reserved) | For the future official GBP API migration. |
+
+All secrets live in the Vercel environment store (synced via CLI, never pasted
+by hand) and in the gitignored local `.env`. As of the hardening sprint, every
+required runtime variable exists in the Vercel store, so git-based or
+other-machine deploys no longer depend on a CLI-uploaded `.env`.

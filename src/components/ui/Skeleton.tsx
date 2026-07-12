@@ -23,15 +23,6 @@ export function SkeletonStatGrid({ count = 4 }: { count?: number }) {
   );
 }
 
-export function SkeletonChart({ height = 180 }: { height?: number }) {
-  return (
-    <div className="card">
-      <Skeleton className="h-3 w-32" />
-      <Skeleton className="mt-3 w-full" style={{ height }} />
-    </div>
-  );
-}
-
 /** A full page skeleton — header + stat grid + two chart blocks. */
 export function PageSkeleton() {
   return (
