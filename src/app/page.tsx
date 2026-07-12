@@ -4,6 +4,7 @@ import { getGoogleAdsOverview } from "@/server/services/google-ads.service";
 import { getActivityTimeline } from "@/server/services/activity.service";
 import { getConnections } from "@/server/connections/connections.service";
 import { NAV } from "@/components/shell/nav";
+import { MorningBrief } from "@/components/ceo/MorningBrief";
 import { Card, NotConnected, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { ScoreRing } from "@/components/charts/Charts";
 import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -111,6 +112,9 @@ export default async function CeoCommandCenter() {
           </div>
         }
       />
+
+      {/* 0 — CEO MORNING BRIEF (Executive Intelligence AI) */}
+      <MorningBrief />
 
       {/* 1 — TODAY'S HOTEL SNAPSHOT */}
       <Section title="Today's Hotel Snapshot" action={kpis ? <Pill tone="ok">{ex.hotelSource}</Pill> : <Pill tone="warn">Waiting</Pill>}>

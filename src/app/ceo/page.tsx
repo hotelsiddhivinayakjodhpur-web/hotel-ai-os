@@ -17,6 +17,7 @@ import {
   type BarDatum,
 } from "@/components/ui/primitives";
 import AutoRefresh from "./AutoRefresh";
+import { MorningBrief } from "@/components/ceo/MorningBrief";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +178,9 @@ export default async function CeoDashboardPage() {
           </div>
         }
       />
+
+      {/* CEO Morning Brief (Executive Intelligence AI) */}
+      <MorningBrief />
 
       {/* Config / status strip */}
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
