@@ -3,7 +3,9 @@ import { logger } from "@/lib/logger";
 import { withRetry } from "@/lib/retry";
 
 /**
- * Windsor.ai client — an OPTIONAL analytics connector, never a mandatory
+ * Windsor.ai client — used ONLY by Google Business Profile (gbp.service.ts)
+ * until official GBP API approval is granted; every other department runs on
+ * first-party APIs. An OPTIONAL analytics connector, never a mandatory
  * dependency. Every caller receives an explicit availability result and must
  * render "Waiting for Production Connection" when data isn't available.
  *

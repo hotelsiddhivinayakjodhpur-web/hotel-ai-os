@@ -74,3 +74,14 @@ the Google/agent work.
   so the CEO + SEO + Analytics dashboards share one fetch.
 - **Idempotent agents.** Every agent run is safe to repeat; webhook delivery is
   deduped on `(bookingId, bookingStatus)`.
+
+## Data-source status (Windsor isolation)
+Every department runs on official first-party APIs:
+GA4, Search Console, YouTube Data + Analytics, Meta Graph (Facebook + Instagram),
+Google Ads API (via MCC) and the Meta Marketing API (Meta Ads) — plus the Gmail
+revenue pipeline.
+
+**Windsor.ai is used ONLY for Google Business Profile** (`gbp.service.ts` via
+`windsor-client.ts`) until official GBP API approval is granted. When that
+approval arrives, GBP migrates to the official API and the Windsor client is
+deleted entirely.

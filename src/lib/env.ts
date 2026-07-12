@@ -97,7 +97,8 @@ const schema = z.object({
   INSTAGRAM_BUSINESS_ID: optionalStr,
   META_ADS_ACCOUNT_ID: optionalStr,
   META_ACCESS_TOKEN: optionalStr,
-  // Aggregator
+  // Aggregator — Windsor is used ONLY for Google Business Profile until
+  // official GBP API approval; every other department runs first-party APIs.
   WINDSOR_API_KEY: optionalStr,
   // AI providers
   OPENAI_API_KEY: optionalStr,

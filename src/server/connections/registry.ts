@@ -186,7 +186,7 @@ export const CONNECTIONS: ConnectionDef[] = [
     category: "AI",
     icon: "◊",
     owner: "Hotel Siddhi Vinayak",
-    description: "Marketing data aggregator (Ads, Meta, GA4, GSC, social) via one API.",
+    description: "Used ONLY for Google Business Profile until official GBP API approval — all other departments run first-party APIs.",
     docsUrl: "https://windsor.ai/api-fields/",
     env: [{ key: "WINDSOR_API_KEY", secret: true }],
     testable: true,
