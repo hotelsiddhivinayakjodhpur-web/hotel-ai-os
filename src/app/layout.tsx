@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
 import { EnvValidationBanner } from "@/components/shell/EnvValidationBanner";
+import { FooterBar } from "@/components/shell/FooterBar";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Topbar />
             <EnvValidationBanner />
             <main className="flex-1 overflow-x-hidden p-6">{children}</main>
+            <FooterBar />
           </div>
         </div>
       </body>

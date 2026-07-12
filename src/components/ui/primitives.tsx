@@ -1,13 +1,21 @@
 import type { ReactNode } from "react";
+import { Breadcrumb } from "@/components/shell/Breadcrumb";
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
   return (
-    <div className="mb-6 flex items-start justify-between gap-4">
-      <div>
-        <h2 className="text-xl font-semibold text-text">{title}</h2>
-        {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+    <div className="mb-6">
+      <div className="mb-2 flex items-center justify-between gap-4">
+        <Breadcrumb />
+        <span className="shrink-0 text-[11px] tabular-nums text-muted" title="Live time is in the header clock (IST)">{today}</span>
       </div>
-      {action}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-text">{title}</h2>
+          {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
     </div>
   );
 }

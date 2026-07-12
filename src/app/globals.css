@@ -28,7 +28,9 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-xl border border-border bg-panel p-5;
+    /* Slightly stronger separation from the page background (dark theme kept):
+       subtle top highlight + soft drop shadow lift cards off the canvas. */
+    @apply rounded-xl border border-border bg-panel p-5 shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset,0_4px_16px_-8px_rgba(0,0,0,0.5)];
   }
   .stat-label {
     @apply text-xs font-medium uppercase tracking-wider text-muted;
