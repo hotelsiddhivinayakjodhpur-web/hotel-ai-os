@@ -20,6 +20,7 @@ export const NAV: NavItem[] = [
   { href: "/analytics", label: "Analytics AI", icon: "▣", description: "Unified data" },
   { href: "/operations", label: "AI Operations", icon: "⛭", description: "Agent control room" },
   { href: "/ceo", label: "CEO Dashboard", icon: "▦", description: "AI OS monitoring (read-only)" },
+  { href: "/marketing", label: "Marketing Ops", icon: "◬", description: "Plan, prepare & approve everything" },
   { href: "/monitoring", label: "Monitoring AI", icon: "◍", description: "Health, alerts & error log" },
   { href: "/settings", label: "Settings", icon: "⚙", description: "Connections & credentials" },
 ];

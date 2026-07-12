@@ -17,6 +17,10 @@ export const CONTENT_CHANNELS = [
   "FESTIVAL",
   "ATTRACTION",
   "ROOM",
+  // DMOC additions (additive — same table, same single approval queue, never auto-sent):
+  "EMAIL",
+  "ADS_CAMPAIGN",
+  "META_CAMPAIGN",
 ] as const;
 export type ContentChannel = (typeof CONTENT_CHANNELS)[number];
 
