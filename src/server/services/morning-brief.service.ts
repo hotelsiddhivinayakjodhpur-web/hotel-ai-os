@@ -11,6 +11,7 @@ import { getHotelDataProvider } from "./hotel-data.provider";
 import { getGmailHealth } from "@/server/gmail/gmail-health.service";
 import { debugToken } from "@/server/integrations/meta-graph-client";
 import { getJodhpurWeather, type JodhpurWeather } from "@/server/integrations/weather-client";
+import { getMonitoringSummary } from "./monitoring.service";
 
 /**
  * Executive Intelligence AI — the CEO Morning Brief.
@@ -90,6 +91,8 @@ async function buildBrief(): Promise<MorningBrief> {
     provider.getMonthToDate().catch(() => null),
     env.META_ACCESS_TOKEN ? debugToken().catch(() => null) : Promise.resolve(null),
   ]);
+  // Monitoring & Alerting AI summary (same cached report the /monitoring page uses).
+  const mon = await getMonitoringSummary().catch(() => null);
 
   const ex = cc.executive;
   const kpis = ex.hotelKpis;
@@ -142,6 +145,13 @@ async function buildBrief(): Promise<MorningBrief> {
     { label: "Deployment", value: "Serving (this brief rendered in production runtime)", tone: "ok" },
     { label: "Backup", value: "No app-level backup job — relies on Supabase platform backups", tone: "muted" },
   ];
+  if (mon) {
+    systemHealth.push({
+      label: "Monitoring AI",
+      value: `${mon.status} · health ${mon.healthScore}/100 · ${mon.critical} critical / ${mon.warnings} warnings`,
+      tone: mon.critical > 0 ? "crit" : mon.warnings > 0 ? "warn" : "ok",
+    });
+  }
   const overallOk = systemHealth.every((l) => l.tone !== "crit");
   systemHealth.push({ label: "Overall", value: overallOk ? "All systems operational" : "Attention required", tone: overallOk ? "ok" : "crit" });
 
@@ -249,8 +259,9 @@ async function buildBrief(): Promise<MorningBrief> {
   if (tokenRes?.data?.is_valid && !tokenRes.data.expires_at) wins.push("Meta token never expires — no renewal risk");
   if (overallOk) wins.push("No system failures");
 
-  // ── Risks (real only) ──
+  // ── Risks (real only; monitoring criticals surface here automatically) ──
   const risks: string[] = [];
+  if (mon && mon.critical > 0) risks.push(`Monitoring AI reports ${mon.critical} critical alert(s) — open /monitoring for reasons and fixes`);
   if (staleDays !== null && staleDays > 2) risks.push(`Revenue data ${staleDays} days old — Stayflexi has not emailed a newer Night Audit`);
   if ((ex.digital.seoHealth ?? 100) < 60) risks.push(`SEO score low (${ex.digital.seoHealth}/100)`);
   if (cc.content.upcoming.length === 0) risks.push("No scheduled content — social pipeline is empty");

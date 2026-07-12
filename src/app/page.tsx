@@ -5,6 +5,7 @@ import { getActivityTimeline } from "@/server/services/activity.service";
 import { getConnections } from "@/server/connections/connections.service";
 import { NAV } from "@/components/shell/nav";
 import { MorningBrief } from "@/components/ceo/MorningBrief";
+import { getMonitoringSummary } from "@/server/services/monitoring.service";
 import { Card, NotConnected, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { ScoreRing } from "@/components/charts/Charts";
 import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -31,11 +32,12 @@ function dayIST(iso: string): string {
 export default async function CeoCommandCenter() {
   // getGoogleAdsOverview/getConnections are already fetched inside the command
   // center; the TTL cache + in-flight dedup make these direct reads free.
-  const [cc, gads, timeline, connections] = await Promise.all([
+  const [cc, gads, timeline, connections, mon] = await Promise.all([
     getCommandCenter(),
     getGoogleAdsOverview(),
     getActivityTimeline(12),
     getConnections(),
+    getMonitoringSummary(),
   ]);
   const ex = cc.executive;
   const kpis = ex.hotelKpis;
@@ -165,6 +167,29 @@ export default async function CeoCommandCenter() {
           )}
         </Card>
       </div>
+
+      {/* 2b — SYSTEM STATUS (Monitoring & Alerting AI) */}
+      <Section title="System Status" action={<Link href="/monitoring" className="text-xs text-brand underline">Open Monitoring AI →</Link>}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Overall Health" value={mon.status} tone={mon.status === "HEALTHY" ? "ok" : mon.status === "CRITICAL" ? "crit" : "warn"} />
+          <StatCard label="Health Score" value={`${mon.healthScore}/100`} tone={mon.healthScore >= 70 ? "ok" : "warn"} />
+          <StatCard label="Critical Alerts" value={fmtInt(mon.critical)} tone={mon.critical > 0 ? "crit" : "ok"} />
+          <StatCard label="Warnings" value={fmtInt(mon.warnings)} tone={mon.warnings > 0 ? "warn" : "ok"} />
+          <StatCard label="Active Incidents" value={fmtInt(mon.activeIncidents)} tone={mon.activeIncidents > 0 ? "crit" : "ok"} />
+          <StatCard label="Resolved Today" value={fmtInt(mon.resolvedToday)} />
+        </div>
+        <Card className="mt-3">
+          <div className="stat-label mb-2">Health Score Breakdown</div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+            {mon.breakdown.map((b) => (
+              <span key={b.category} className="text-muted">
+                {b.category}{" "}
+                <span className={`font-mono font-semibold tabular-nums ${b.score >= 80 ? "text-ok" : b.score >= 50 ? "text-warn" : "text-crit"}`}>{b.score}</span>
+              </span>
+            ))}
+          </div>
+        </Card>
+      </Section>
 
       {/* 3 — ALERT PRIORITY SYSTEM */}
       <Section title="Alerts & Priorities">

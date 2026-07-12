@@ -15,10 +15,24 @@ interface Entry<T> {
 
 const store = new Map<string, Entry<unknown>>();
 
+// Instrumentation for the Monitoring AI — counters only, zero behaviour change.
+let hits = 0;
+let misses = 0;
+
+/** Cache statistics for this server instance (resets on cold start). */
+export function getCacheStats(): { hits: number; misses: number; entries: number; hitRatePct: number | null } {
+  const total = hits + misses;
+  return { hits, misses, entries: store.size, hitRatePct: total > 0 ? Math.round((hits / total) * 100) : null };
+}
+
 export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = store.get(key) as Entry<T> | undefined;
-  if (hit && hit.expires > now) return hit.value;
+  if (hit && hit.expires > now) {
+    hits++;
+    return hit.value;
+  }
+  misses++;
 
   // Store the PROMISE so concurrent callers dedupe to a single fetch.
   const value = fn();

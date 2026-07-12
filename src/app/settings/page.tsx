@@ -1,4 +1,5 @@
 import { getConnections } from "@/server/connections/connections.service";
+import { getMonitoringSummary } from "@/server/services/monitoring.service";
 import { ConnectionCard } from "@/components/settings/ConnectionCard";
 import { PageHeader, Section, StatCard } from "@/components/ui/primitives";
 import type { ConnectionCategory, ConnectionView } from "@/server/connections/types";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 const CATEGORY_ORDER: ConnectionCategory[] = ["Google", "Meta", "Booking", "AI", "Automation", "Infrastructure"];
 
 export default async function SettingsPage() {
-  const connections = await getConnections();
+  const [connections, mon] = await Promise.all([getConnections(), getMonitoringSummary()]);
 
   const live = connections.filter((c) => c.status === "CONNECTED").length;
   const pending = connections.filter((c) => c.status === "WAITING" || c.status === "APP_REVIEW").length;
@@ -32,6 +33,21 @@ export default async function SettingsPage() {
         title="Settings & Connections"
         subtitle="Single source of truth for every integration. Credentials are read only from environment variables — never stored here."
       />
+
+      {/* Monitoring quick links (central health engine) */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold uppercase tracking-wider text-muted">Monitoring:</span>
+        <a href="/monitoring#system" className="pill border border-border bg-panel text-muted transition-colors hover:text-text">Health</a>
+        <a href="/monitoring" className="pill border border-border bg-panel text-muted transition-colors hover:text-text">Alerts</a>
+        <a href="/monitoring" className="pill border border-border bg-panel text-muted transition-colors hover:text-text">Logs</a>
+        <span className="text-muted">
+          Last scan:{" "}
+          <span className="font-mono tabular-nums text-text">
+            {new Date(mon.lastScanIso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })} IST
+          </span>{" "}
+          · <span className={mon.critical > 0 ? "text-crit" : "text-ok"}>{mon.status} {mon.healthScore}/100</span>
+        </span>
+      </div>
 
       {/* Summary */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
