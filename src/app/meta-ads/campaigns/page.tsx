@@ -22,7 +22,7 @@ export default async function MetaAdsCampaignsPage() {
     <div>
       <PageHeader
         title="Campaigns"
-        subtitle="Campaign · Performance · Conversions — read-only via the optional Windsor connector"
+        subtitle="Campaign · Performance · Conversions — read-only via the official Meta Marketing API"
         action={<Pill tone={c.status === "LIVE" ? "ok" : "warn"}>{c.status === "LIVE" ? "Live" : "Waiting"}</Pill>}
       />
       <MetaAdsNav />

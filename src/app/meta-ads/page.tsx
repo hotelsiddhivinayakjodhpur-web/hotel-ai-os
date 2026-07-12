@@ -24,7 +24,7 @@ export default async function MetaAdsDashboard() {
       {/* Connection Status */}
       <Section title="Connection Status">
         <div className="grid gap-4 md:grid-cols-3">
-          <StatusCard name="Windsor Meta Ads (optional)" ok={c.status === "LIVE"} detail={c.status === "LIVE" ? "Delivering data" : (c.reason ?? "Not connected")} />
+          <StatusCard name="Meta Marketing API (official, read-only)" ok={c.status === "LIVE"} detail={c.status === "LIVE" ? "Delivering data" : (c.reason ?? "Not connected")} />
           <StatusCard name="Content AI (offers, festivals & creatives)" ok detail="Campaign-asset + creative source · ContentItem" />
           <StatusCard name="Meta Marketing write API" ok={false} detail="Intentionally never used — read-only architecture" />
         </div>

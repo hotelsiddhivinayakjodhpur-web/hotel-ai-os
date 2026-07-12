@@ -149,6 +149,22 @@ export const CONNECTION_TESTS: Record<string, () => Promise<ConnectionTestResult
     }
   },
 
+  "meta-ads": async () => {
+    if (!env.META_ACCESS_TOKEN || !env.META_ADS_ACCOUNT_ID) return fail("NOT_CONFIGURED", "META_ACCESS_TOKEN / META_ADS_ACCOUNT_ID not set.");
+    try {
+      const id = env.META_ADS_ACCOUNT_ID.replace(/^act_/, "");
+      const r = await graphGet<{ name?: string; account_status?: number; currency?: string }>(`act_${id}`, { fields: "name,account_status,currency" });
+      return ok(`${r.name ?? "Ad account"} · status ${r.account_status ?? "?"} · ${r.currency ?? ""}`);
+    } catch (e) {
+      if (e instanceof MetaApiError) {
+        if (e.code === 190) return fail("TOKEN_EXPIRED", e.reason);
+        if (e.code === 10 || e.code === 200 || e.code === 283) return fail("PERMISSION_DENIED", e.reason);
+        return fail(mapHttp(e.httpStatus, e.message), e.reason);
+      }
+      return fail("ERROR", e instanceof Error ? e.message : String(e));
+    }
+  },
+
   windsor: async () => {
     if (!env.WINDSOR_API_KEY) return fail("NOT_CONFIGURED", "WINDSOR_API_KEY not set.");
     try {

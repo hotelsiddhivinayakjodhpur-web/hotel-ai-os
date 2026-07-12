@@ -45,6 +45,9 @@ export async function GET(req: NextRequest) {
 
   const configured = {
     META_ACCESS_TOKEN: Boolean(env.META_ACCESS_TOKEN),
+    // Masked fingerprint so a stale-secret-in-store is diagnosable without
+    // ever exposing the credential (secret-gated endpoint, 12 chars + length).
+    tokenFingerprint: env.META_ACCESS_TOKEN ? `${env.META_ACCESS_TOKEN.slice(0, 12)}… (len ${env.META_ACCESS_TOKEN.length})` : null,
     FACEBOOK_PAGE_ID: env.FACEBOOK_PAGE_ID ?? null,
     INSTAGRAM_BUSINESS_ID: env.INSTAGRAM_BUSINESS_ID ?? null,
     FACEBOOK_ACCESS_TOKEN_provided: Boolean(env.FACEBOOK_ACCESS_TOKEN),
@@ -159,5 +162,38 @@ export async function GET(req: NextRequest) {
       }
     : { skipped: "INSTAGRAM_BUSINESS_ID not set" };
 
-  return NextResponse.json({ configured, token, fbMetrics, postImpressions, facebook: fb, instagram: ig });
+  // ── Meta Ads (Marketing API, read-only) ──
+  const adsId = env.META_ADS_ACCOUNT_ID?.replace(/^act_/, "");
+  const metaAds = adsId
+    ? {
+        account: await probe(
+          () => graphGet<{ name?: string; account_status?: number; currency?: string }>(`act_${adsId}`, { fields: "name,account_status,currency" }),
+          (r) => `${r.name} · status ${r.account_status} · ${r.currency}`,
+        ),
+        campaignInsights: await probe(
+          () =>
+            graphGet<{ data?: { campaign_name?: string; spend?: string }[] }>(`act_${adsId}/insights`, {
+              level: "campaign",
+              fields: "campaign_name,clicks,impressions,spend,reach",
+              date_preset: "last_30d",
+            }),
+          (r) => `${(r.data ?? []).length} campaign insight row(s)`,
+        ),
+        dailyInsights: await probe(
+          () =>
+            graphGet<{ data?: { date_start?: string }[] }>(`act_${adsId}/insights`, {
+              fields: "clicks,impressions,spend,reach",
+              time_increment: "1",
+              date_preset: "last_30d",
+            }),
+          (r) => `${(r.data ?? []).length} daily row(s)`,
+        ),
+        actions: await probe(
+          () => graphGet<{ data?: { actions?: { action_type?: string }[] }[] }>(`act_${adsId}/insights`, { fields: "actions", date_preset: "last_30d" }),
+          (r) => `${(r.data?.[0]?.actions ?? []).length} action type(s)`,
+        ),
+      }
+    : { skipped: "META_ADS_ACCOUNT_ID not set" };
+
+  return NextResponse.json({ configured, token, fbMetrics, postImpressions, facebook: fb, instagram: ig, metaAds });
 }

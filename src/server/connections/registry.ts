@@ -151,13 +151,13 @@ export const CONNECTIONS: ConnectionDef[] = [
     category: "Meta",
     icon: "◈",
     owner: "Hotel Siddhi Vinayak",
-    description: "Ad campaigns, audiences, pixel, budgets, performance.",
+    description: "Official Meta Marketing API — campaigns, delivery, conversions (read-only).",
     docsUrl: "https://developers.facebook.com/docs/marketing-apis",
     env: [
       { key: "META_ADS_ACCOUNT_ID", secret: false },
       { key: "META_ACCESS_TOKEN", secret: true },
     ],
-    testable: false,
+    testable: true,
     requiresAppReview: true,
   },
 
