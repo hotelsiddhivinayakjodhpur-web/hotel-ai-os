@@ -21,6 +21,8 @@ export const CONTENT_CHANNELS = [
   "EMAIL",
   "ADS_CAMPAIGN",
   "META_CAMPAIGN",
+  // Content Factory: one complete ready-to-post package per item (markdown body).
+  "PACKAGE",
 ] as const;
 export type ContentChannel = (typeof CONTENT_CHANNELS)[number];
 
