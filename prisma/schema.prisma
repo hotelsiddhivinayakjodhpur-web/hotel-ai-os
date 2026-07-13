@@ -523,3 +523,23 @@ model MediaAsset {
   @@index([category])
   @@index([mediaType, archived])
 }
+
+/// Publishing audit log for the Social Media Execution Center — one row per
+/// publish/schedule/retry action the OPERATOR takes. The app holds only
+/// read scopes (no platform write API is wired), so "PUBLISH" records an
+/// operator-confirmed manual post, never an auto-post. Tracks SUCCESS /
+/// FAILED / RETRY / SKIPPED with any error for the publishing logs view.
+model PublishLog {
+  id            String   @id @default(cuid())
+  contentItemId String?
+  channel       String
+  action        String   @default("PUBLISH") // PUBLISH | SCHEDULE | RETRY
+  status        String // SUCCESS | FAILED | RETRY | SKIPPED
+  detail        String?
+  error         String?
+  attempt       Int      @default(1)
+  createdAt     DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([channel])
+}
