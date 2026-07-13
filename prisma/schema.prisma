@@ -484,3 +484,42 @@ model GoogleAdsSyncLog {
 
   @@index([status, startedAt])
 }
+
+/// Central Hotel Media Library — one row per real hotel photo/video the
+/// OPERATOR registers (file lives in the hotel's own storage; we keep the
+/// reference + metadata). All metadata is operator-provided at registration:
+/// the app performs NO computer vision, invents NO photos and fabricates NO
+/// scores. The Smart Media Suggestion engine ranks these real assets against
+/// content requirements and reports what is missing — it never auto-selects.
+model MediaAsset {
+  id                String   @id @default(cuid())
+  fileName          String
+  url               String   @unique // reference/link to the operator's stored file
+  mediaType         String   @default("PHOTO") // PHOTO | VIDEO
+  category          String // Rooms | Reception | Lobby | Restaurant | Food | ...
+  roomType          String?
+  location          String?
+  cameraAngle       String?
+  timeOfDay         String? // Sunrise | Morning | Midday | Golden hour | Night ...
+  indoorOutdoor     String? // INDOOR | OUTDOOR
+  orientation       String   @default("LANDSCAPE") // LANDSCAPE | PORTRAIT | SQUARE
+  peopleCount       Int?
+  luxuryScore       Int? // operator self-rating 0-100 (not CV)
+  qualityScore      Int?
+  compositionScore  Int?
+  lightingScore     Int?
+  sharpnessScore    Int?
+  season            String?
+  festival          String?
+  suitablePlatforms String? // CSV: INSTAGRAM,FACEBOOK,YOUTUBE,GBP,BLOG,EMAIL,ADS
+  suggestedUse      String?
+  primaryColors     String?
+  thumbnailFriendly Boolean  @default(false)
+  notes             String?
+  archived          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([category])
+  @@index([mediaType, archived])
+}

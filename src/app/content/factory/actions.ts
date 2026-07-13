@@ -6,6 +6,7 @@ import { getInstagramOverview } from "@/server/services/instagram.service";
 import { getFacebookOverview } from "@/server/services/facebook.service";
 import { getAnalyticsReport } from "@/server/services/analytics.service";
 import { saveContent } from "@/server/services/content.service";
+import { recommendMediaForTopic } from "@/server/services/media.service";
 
 /**
  * Content Factory action — builds ONE ready-to-post package by reusing the
@@ -33,9 +34,21 @@ async function realBaselines(): Promise<FactoryBaselines> {
 }
 
 export async function generatePackageAction(topic: PackageTopic, detail: string) {
-  const baselines = await realBaselines();
+  const [baselines, media] = await Promise.all([realBaselines(), recommendMediaForTopic(topic)]);
   const pkg = buildContentPackage(topic, detail, baselines);
-  return { markdown: renderPackageMarkdown(pkg), package: pkg };
+  // Attach Smart Media Suggestions (real registered assets ranked; missing report).
+  const mediaMd = renderMediaSuggestionsMarkdown(media);
+  return { markdown: `${renderPackageMarkdown(pkg)}\n\n${mediaMd}`, package: pkg, media };
+}
+
+function renderMediaSuggestionsMarkdown(m: Awaited<ReturnType<typeof recommendMediaForTopic>>): string {
+  const L: string[] = ["## 19 · Suggested media (from the real library — operator selects the final media)"];
+  L.push(m.note);
+  if (m.missingReport.length > 0) L.push("", `**Missing assets to capture:** ${m.missingReport.join(" · ")}`);
+  for (const s of m.suggestions) {
+    L.push(s.primary ? `- ${s.section}: ${s.primary.asset.fileName} (${s.primary.confidence}% fit — ${s.primary.reason})` : `- ${s.section}: MISSING (${s.missing})`);
+  }
+  return L.join("\n");
 }
 
 export async function savePackageAction(topic: PackageTopic, detail: string, markdown: string) {
