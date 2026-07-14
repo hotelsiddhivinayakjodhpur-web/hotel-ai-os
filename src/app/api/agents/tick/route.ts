@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { tick } from "@/server/agents/runner";
 import { cronSecret, isAuthorized } from "@/lib/api-auth";
 import { syncGmailReports } from "@/server/gmail/gmail.service";
+import { syncBookingReports } from "@/server/gmail/booking-intake.service";
 import { gmailConfigured } from "@/server/gmail/gmail-auth";
 
 /**
@@ -24,11 +25,15 @@ export async function POST(req: NextRequest) {
   // agents run so the CEO/Analytics agents see fresh data. Best-effort: a Gmail
   // failure never blocks the agent run.
   let gmail: Awaited<ReturnType<typeof syncGmailReports>> | null = null;
+  let bookings: Awaited<ReturnType<typeof syncBookingReports>> | null = null;
   if (gmailConfigured()) {
     gmail = await syncGmailReports("cron").catch(() => null);
+    // Daily booking-report intake (Master Report etc.) — best-effort; upserts by
+    // Booking Id and refreshes Booking Intelligence. Never blocks the agent run.
+    bookings = await syncBookingReports("cron").catch(() => null);
   }
   const results = await tick(force);
-  return NextResponse.json({ ok: true, gmail, ran: results.length, results });
+  return NextResponse.json({ ok: true, gmail, bookings, ran: results.length, results });
 }
 
 // Vercel Cron issues GET; mirror POST.

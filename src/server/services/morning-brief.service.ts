@@ -12,6 +12,7 @@ import { getGmailHealth } from "@/server/gmail/gmail-health.service";
 import { debugToken } from "@/server/integrations/meta-graph-client";
 import { getJodhpurWeather, type JodhpurWeather } from "@/server/integrations/weather-client";
 import { getMonitoringSummary } from "./monitoring.service";
+import { getExecutiveBookingSummary } from "./booking-analytics.service";
 
 /**
  * Executive Intelligence AI — the CEO Morning Brief.
@@ -93,6 +94,8 @@ async function buildBrief(): Promise<MorningBrief> {
   ]);
   // Monitoring & Alerting AI summary (same cached report the /monitoring page uses).
   const mon = await getMonitoringSummary().catch(() => null);
+  // Executive Intelligence consumes Booking Intelligence (single source of truth).
+  const bookingExec = await getExecutiveBookingSummary().catch(() => null);
 
   const ex = cc.executive;
   const kpis = ex.hotelKpis;
@@ -151,6 +154,9 @@ async function buildBrief(): Promise<MorningBrief> {
       value: `${mon.status} · health ${mon.healthScore}/100 · ${mon.critical} critical / ${mon.warnings} warnings`,
       tone: mon.critical > 0 ? "crit" : mon.warnings > 0 ? "warn" : "ok",
     });
+  }
+  if (bookingExec?.configured) {
+    systemHealth.push({ label: "Booking history", value: bookingExec.headline, tone: "info" });
   }
   const overallOk = systemHealth.every((l) => l.tone !== "crit");
   systemHealth.push({ label: "Overall", value: overallOk ? "All systems operational" : "Attention required", tone: overallOk ? "ok" : "crit" });
@@ -262,6 +268,8 @@ async function buildBrief(): Promise<MorningBrief> {
   // ── Risks (real only; monitoring criticals surface here automatically) ──
   const risks: string[] = [];
   if (mon && mon.critical > 0) risks.push(`Monitoring AI reports ${mon.critical} critical alert(s) — open /monitoring for reasons and fixes`);
+  const hiBookingAlert = bookingExec?.topAlerts?.find((a) => a.severity === "high");
+  if (hiBookingAlert) risks.push(`Booking Intelligence: ${hiBookingAlert.title} — ${hiBookingAlert.detail.slice(0, 80)}`);
   if (staleDays !== null && staleDays > 2) risks.push(`Revenue data ${staleDays} days old — Stayflexi has not emailed a newer Night Audit`);
   if ((ex.digital.seoHealth ?? 100) < 60) risks.push(`SEO score low (${ex.digital.seoHealth}/100)`);
   if (cc.content.upcoming.length === 0) risks.push("No scheduled content — social pipeline is empty");

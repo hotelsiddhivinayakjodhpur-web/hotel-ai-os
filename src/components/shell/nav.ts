@@ -18,6 +18,7 @@ export const NAV: NavItem[] = [
   { href: "/google-ads", label: "Google Ads AI", icon: "◎", description: "Campaign intelligence (read-only)" },
   { href: "/meta-ads", label: "Meta Ads AI", icon: "◈", description: "Meta campaigns (read-only)" },
   { href: "/analytics", label: "Analytics AI", icon: "▣", description: "Unified data" },
+  { href: "/bookings", label: "Booking History", icon: "▥", description: "Imported booking dataset & analytics" },
   { href: "/operations", label: "AI Operations", icon: "⛭", description: "Agent control room" },
   { href: "/ceo", label: "CEO Dashboard", icon: "▦", description: "AI OS monitoring (read-only)" },
   { href: "/marketing", label: "Marketing Ops", icon: "◬", description: "Plan, prepare & approve everything" },

@@ -47,6 +47,15 @@ export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>
   }
 }
 
+/**
+ * Drop a cached entry so the next call recomputes. Used after a data import
+ * (e.g. new bookings ingested) to refresh derived analytics immediately rather
+ * than waiting for the TTL to lapse. Returns true if an entry was removed.
+ */
+export function invalidate(key: string): boolean {
+  return store.delete(key);
+}
+
 /** Common TTLs. */
 export const TTL = {
   short: 60_000, // 1 min

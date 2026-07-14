@@ -6,6 +6,7 @@ import { getConnections } from "@/server/connections/connections.service";
 import { NAV } from "@/components/shell/nav";
 import { MorningBrief } from "@/components/ceo/MorningBrief";
 import { getMonitoringSummary } from "@/server/services/monitoring.service";
+import { getBookingAnalytics } from "@/server/services/booking-analytics.service";
 import { Card, NotConnected, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { ScoreRing } from "@/components/charts/Charts";
 import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -32,12 +33,13 @@ function dayIST(iso: string): string {
 export default async function CeoCommandCenter() {
   // getGoogleAdsOverview/getConnections are already fetched inside the command
   // center; the TTL cache + in-flight dedup make these direct reads free.
-  const [cc, gads, timeline, connections, mon] = await Promise.all([
+  const [cc, gads, timeline, connections, mon, booking] = await Promise.all([
     getCommandCenter(),
     getGoogleAdsOverview(),
     getActivityTimeline(12),
     getConnections(),
     getMonitoringSummary(),
+    getBookingAnalytics(),
   ]);
   const ex = cc.executive;
   const kpis = ex.hotelKpis;
@@ -133,6 +135,30 @@ export default async function CeoCommandCenter() {
           <StatCard label="Ads Clicks" value={adsTotals ? fmtInt(adsTotals.clicks) : "—"} hint="30d" />
         </div>
       </Section>
+
+      {/* 1b — BOOKING HISTORY (imported dataset — distinct grain from Night Audit above) */}
+      {booking.configured && booking.totals.bookings > 0 && (
+        <Section
+          title="Booking History"
+          action={<Link href="/bookings" className="text-xs text-brand underline">Open Booking History →</Link>}
+        >
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatCard label="Total Bookings" value={fmtInt(booking.totals.bookings)} hint={`${booking.totals.firstCheckIn} → ${booking.totals.lastCheckIn}`} />
+            <StatCard label="Lifetime Revenue" value={fmtMoney(booking.totals.revenue)} tone="ok" hint="excl. cancelled" />
+            <StatCard label="ADR" value={booking.totals.adr !== null ? fmtMoney(booking.totals.adr) : "—"} hint="rev / room-night" />
+            <StatCard label="Cancellation" value={booking.totals.cancelRatePct !== null ? `${booking.totals.cancelRatePct}%` : "—"} tone={booking.totals.cancelRatePct && booking.totals.cancelRatePct > 15 ? "warn" : "default"} />
+            <StatCard label="Peak Occupancy" value={booking.occupancy.peakOccMonth ? `${booking.occupancy.peakOccMonth.occPct}%` : "—"} hint={booking.occupancy.peakOccMonth?.month} tone="ok" />
+            <StatCard label="Booking Alerts" value={fmtInt(booking.alerts.length)} tone={booking.alerts.some((a) => a.severity === "high") ? "crit" : booking.alerts.length > 0 ? "warn" : "default"} hint="threshold-triggered" />
+          </div>
+          <div className="mt-2 grid gap-1.5 text-[11px] text-muted sm:grid-cols-2">
+            <span>Best source: <span className="text-text">{booking.ceo.bestSource ?? "—"}</span></span>
+            <span>Best room type: <span className="text-text">{booking.ceo.bestRoomType ?? "—"}</span></span>
+            <span>Highest-cancellation source: <span className="text-text">{booking.ceo.highestCancelSource ?? "—"}</span></span>
+            <span>Latest YoY / MoM: <span className="text-text">{booking.ceo.latestYoYPct !== null ? `${booking.ceo.latestYoYPct >= 0 ? "+" : ""}${booking.ceo.latestYoYPct}%` : "—"} / {booking.ceo.latestMoMPct !== null ? `${booking.ceo.latestMoMPct >= 0 ? "+" : ""}${booking.ceo.latestMoMPct}%` : "—"}</span></span>
+            <span className="sm:col-span-2 text-[10px] text-muted/70">Historical import (Booking Id keyed) — separate grain from today&apos;s Night Audit above. <Link href="/bookings" className="text-brand underline">Full Booking Intelligence →</Link></span>
+          </div>
+        </Section>
+      )}
 
       {/* 2 — EXECUTIVE AI SUMMARY + CEO SCORE */}
       <div className="grid gap-4 lg:grid-cols-3">

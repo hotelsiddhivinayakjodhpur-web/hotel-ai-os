@@ -543,3 +543,60 @@ model PublishLog {
   @@index([status, createdAt])
   @@index([channel])
 }
+
+/// Historical + daily booking dataset (Booking Id = business key). Loaded from
+/// Stayflexi Master / unifiedBookingReport CSV/XLSX via the booking parser;
+/// future daily reports APPEND with ON CONFLICT upsert (never overwrite history,
+/// never duplicate). Additive — does not touch the Night Audit tables.
+model Booking {
+  bookingId       String    @id
+  roomNo          String?
+  otaBookingId    String?
+  bookingDate     DateTime? @db.Date
+  source          String?
+  segment         String?
+  status          String?
+  guest           String?
+  adults          Int?
+  children        Int?
+  rooms           Int?
+  checkInDate     DateTime? @db.Date
+  checkOutDate    DateTime? @db.Date
+  roomNights      Int?
+  roomTypes       String?
+  ratePlans       String?
+  taxAmount       Float?
+  totalAmount     Float?
+  paymentMade     Float?
+  balanceDue      Float?
+  roomRevenue     Float?
+  otaCommission   Float?
+  customerPhone   String?
+  customerEmail   String?
+  customerCity    String?
+  customerState   String?
+  customerCountry String?
+  sourceFile      String?
+  importedAt      DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([bookingDate])
+  @@index([checkInDate])
+  @@index([source])
+  @@index([status])
+  @@index([customerPhone])
+}
+
+/// Run-level audit for booking-report imports (dedup + counts).
+model BookingImportLog {
+  id         String   @id @default(cuid())
+  sourceFile String
+  reportType String?
+  rowsRead   Int      @default(0)
+  inserted   Int      @default(0)
+  updated    Int      @default(0)
+  skipped    Int      @default(0)
+  status     String
+  error      String?
+  createdAt  DateTime @default(now())
+}
