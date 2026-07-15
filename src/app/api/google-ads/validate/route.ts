@@ -56,12 +56,15 @@ export async function GET(req: NextRequest) {
 
   // Campaign Intelligence (Department 1) — confirm impression-share fields return live values.
   const impressionShare = await probe(async () => {
+    // Search-only (Smart/PMax campaigns don't support IS metrics — this mirrors the service).
     const rows = (await adsSearch(
-      "SELECT campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share FROM campaign WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 10",
+      "SELECT campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share FROM campaign WHERE segments.date DURING LAST_30_DAYS AND campaign.advertising_channel_type = 'SEARCH'",
     )) as { campaign?: { name?: string }; metrics?: { searchImpressionShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
     const withIs = rows.filter((r) => typeof r.metrics?.searchImpressionShare === "number");
     const top = withIs[0];
-    return `${withIs.length}/${rows.length} campaign(s) report IS${top ? ` · "${top.campaign?.name}" IS ${((top.metrics!.searchImpressionShare as number) * 100).toFixed(0)}%, lostBudget ${(((top.metrics?.searchBudgetLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%, lostRank ${(((top.metrics?.searchRankLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%` : ""}`;
+    return rows.length === 0
+      ? "0 Search campaigns (IS not applicable — account uses Smart/PMax)"
+      : `${withIs.length}/${rows.length} Search campaign(s) report IS${top ? ` · "${top.campaign?.name}" IS ${((top.metrics!.searchImpressionShare as number) * 100).toFixed(0)}%, lostBudget ${(((top.metrics?.searchBudgetLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%, lostRank ${(((top.metrics?.searchRankLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%` : ""}`;
   });
 
   const qualityScore = await probe(async () => {

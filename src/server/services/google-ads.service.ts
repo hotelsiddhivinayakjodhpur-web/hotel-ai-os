@@ -243,11 +243,28 @@ function scoreCampaignHealth(
   return { score, status, issues };
 }
 
+/** Impression-weighted average over rows that report a value (null if none do). */
+function impressionWeightedAvg<T extends { impressions: number }>(rows: T[], pick: (r: T) => number | null): number | null {
+  let num = 0;
+  let den = 0;
+  for (const r of rows) {
+    const v = pick(r);
+    if (v != null && r.impressions > 0) {
+      num += v * r.impressions;
+      den += r.impressions;
+    }
+  }
+  return den > 0 ? num / den : null;
+}
+
 export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsCampaignsData> {
+  // Base performance query — deliberately WITHOUT impression-share metrics, which
+  // are invalid for Smart/Performance-Max campaigns and would fail the whole query.
+  // Impression share is fetched separately (getImpressionShare) and merged in the
+  // Campaign Intelligence layer, so this core query always succeeds.
   const rows = (await adsSearch(
     `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros,
-            metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions, metrics.conversions_value,
-            metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
+            metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions, metrics.conversions_value
      FROM campaign WHERE ${duringClause(preset)} ORDER BY metrics.cost_micros DESC`,
   )) as GaqlCampaignRow[];
 
@@ -261,9 +278,6 @@ export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Prom
       const conversions = Number(r.metrics?.conversions ?? 0);
       const conversionValue = Number(r.metrics?.conversionsValue ?? 0);
       const budget = fromMicros(r.campaignBudget?.amountMicros);
-      const is = typeof r.metrics?.searchImpressionShare === "number" ? r.metrics.searchImpressionShare : null;
-      const lostBudget = typeof r.metrics?.searchBudgetLostImpressionShare === "number" ? r.metrics.searchBudgetLostImpressionShare : null;
-      const lostRank = typeof r.metrics?.searchRankLostImpressionShare === "number" ? r.metrics.searchRankLostImpressionShare : null;
       return {
         campaign: r.campaign!.name!,
         status: r.campaign?.status ?? "",
@@ -277,9 +291,9 @@ export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Prom
         avgCpc: clicks > 0 ? cost / clicks : null,
         cpa: conversions > 0 ? cost / conversions : null,
         roas: cost > 0 && conversionValue > 0 ? conversionValue / cost : null,
-        impressionShare: is,
-        lostIsBudget: lostBudget,
-        lostIsRank: lostRank,
+        impressionShare: null as number | null,
+        lostIsBudget: null as number | null,
+        lostIsRank: null as number | null,
         budgetUtilization: budget > 0 ? cost / days / budget : null,
       };
     });
@@ -295,34 +309,52 @@ export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Prom
     { clicks: 0, impressions: 0, cost: 0, conversions: 0, conversionValue: 0 },
   );
   const accountCpa = sum.conversions > 0 ? sum.cost / sum.conversions : null;
-
-  // Impression-weighted account IS averages (only over campaigns that report IS).
-  const wAvg = (pick: (r: (typeof base)[number]) => number | null): number | null => {
-    let num = 0;
-    let den = 0;
-    for (const r of base) {
-      const v = pick(r);
-      if (v != null && r.impressions > 0) {
-        num += v * r.impressions;
-        den += r.impressions;
-      }
-    }
-    return den > 0 ? num / den : null;
-  };
-
   const totals: AdsTotals = {
     ...sum,
     ctr: sum.impressions > 0 ? sum.clicks / sum.impressions : null,
     avgCpc: sum.clicks > 0 ? sum.cost / sum.clicks : null,
     costPerConversion: accountCpa,
     roas: sum.cost > 0 && sum.conversionValue > 0 ? sum.conversionValue / sum.cost : null,
-    impressionShare: wAvg((r) => r.impressionShare),
-    lostIsBudget: wAvg((r) => r.lostIsBudget),
-    lostIsRank: wAvg((r) => r.lostIsRank),
+    impressionShare: null,
+    lostIsBudget: null,
+    lostIsRank: null,
   };
 
   const mapped: AdsCampaignRow[] = base.map((r) => ({ ...r, health: scoreCampaignHealth(r, accountCpa) }));
   return { rows: mapped.slice(0, 20), totals };
+}
+
+interface CampaignIsRow {
+  impressionShare: number | null;
+  lostIsBudget: number | null;
+  lostIsRank: number | null;
+}
+
+/**
+ * Impression share — isolated, best-effort. Only Search (and Shopping) campaigns
+ * report it; Smart/Performance-Max return INVALID_ARGUMENT. Filtered to SEARCH
+ * and try/caught so it can never break the base campaign query. Keyed by name.
+ */
+async function getImpressionShare(preset: AdsDatePreset): Promise<Map<string, CampaignIsRow>> {
+  const map = new Map<string, CampaignIsRow>();
+  try {
+    const rows = (await adsSearch(
+      `SELECT campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
+       FROM campaign WHERE ${duringClause(preset)} AND campaign.advertising_channel_type = 'SEARCH'`,
+    )) as { campaign?: { name?: string }; metrics?: { searchImpressionShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
+    for (const r of rows) {
+      const name = r.campaign?.name;
+      if (!name) continue;
+      map.set(name, {
+        impressionShare: typeof r.metrics?.searchImpressionShare === "number" ? r.metrics.searchImpressionShare : null,
+        lostIsBudget: typeof r.metrics?.searchBudgetLostImpressionShare === "number" ? r.metrics.searchBudgetLostImpressionShare : null,
+        lostIsRank: typeof r.metrics?.searchRankLostImpressionShare === "number" ? r.metrics.searchRankLostImpressionShare : null,
+      });
+    }
+  } catch {
+    // Impression share unavailable (e.g. Smart/PMax account) — degrade to empty.
+  }
+  return map;
 }
 
 interface GaqlDailyRow {
@@ -469,15 +501,36 @@ async function buildCampaignIntelligence(preset: AdsDatePreset): Promise<Campaig
     return { ...empty, reason: "Google Ads API not connected (set GOOGLE_ADS_* env vars)." };
   }
 
-  const [campRes, kwRes] = await Promise.allSettled([getCampaigns(preset), getKeywords(preset)]);
+  const [campRes, isRes, kwRes] = await Promise.allSettled([getCampaigns(preset), getImpressionShare(preset), getKeywords(preset)]);
 
   if (campRes.status === "rejected") {
     return { ...empty, status: "WAITING", reason: failReason(campRes.reason) };
   }
-  const { rows, totals } = campRes.value;
-  if (rows.length === 0) {
+  const base = campRes.value;
+  if (base.rows.length === 0) {
     return { ...empty, status: "WAITING", reason: "No campaign data returned yet (account may have no active campaigns)." };
   }
+
+  // Merge best-effort impression share onto each campaign, then re-score health
+  // (health thresholds use budget/rank IS loss when available).
+  const isMap = isRes.status === "fulfilled" ? isRes.value : new Map<string, CampaignIsRow>();
+  const accountCpa = base.totals.costPerConversion;
+  const rows: AdsCampaignRow[] = base.rows.map((r) => {
+    const is = isMap.get(r.campaign);
+    const withIs = {
+      ...r,
+      impressionShare: is?.impressionShare ?? null,
+      lostIsBudget: is?.lostIsBudget ?? null,
+      lostIsRank: is?.lostIsRank ?? null,
+    };
+    return { ...withIs, health: scoreCampaignHealth(withIs, accountCpa) };
+  });
+  const totals: AdsTotals = {
+    ...base.totals,
+    impressionShare: impressionWeightedAvg(rows, (r) => r.impressionShare),
+    lostIsBudget: impressionWeightedAvg(rows, (r) => r.lostIsBudget),
+    lostIsRank: impressionWeightedAvg(rows, (r) => r.lostIsRank),
+  };
 
   const keywords = kwRes.status === "fulfilled" ? kwRes.value : [];
   const qualityScore = summariseQualityScore(keywords);
