@@ -54,6 +54,25 @@ export async function GET(req: NextRequest) {
     return `${rows.length} campaign row(s)${first ? ` · top "${first.campaign?.name}" cost ₹${fromMicros(first.metrics?.costMicros).toFixed(0)}` : ""}`;
   });
 
+  // Campaign Intelligence (Department 1) — confirm impression-share fields return live values.
+  const impressionShare = await probe(async () => {
+    const rows = (await adsSearch(
+      "SELECT campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share FROM campaign WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 10",
+    )) as { campaign?: { name?: string }; metrics?: { searchImpressionShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
+    const withIs = rows.filter((r) => typeof r.metrics?.searchImpressionShare === "number");
+    const top = withIs[0];
+    return `${withIs.length}/${rows.length} campaign(s) report IS${top ? ` · "${top.campaign?.name}" IS ${((top.metrics!.searchImpressionShare as number) * 100).toFixed(0)}%, lostBudget ${(((top.metrics?.searchBudgetLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%, lostRank ${(((top.metrics?.searchRankLostImpressionShare as number) ?? 0) * 100).toFixed(0)}%` : ""}`;
+  });
+
+  const qualityScore = await probe(async () => {
+    const rows = (await adsSearch(
+      "SELECT ad_group_criterion.keyword.text, ad_group_criterion.quality_info.quality_score, metrics.impressions FROM keyword_view WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 25",
+    )) as { adGroupCriterion?: { keyword?: { text?: string }; qualityInfo?: { qualityScore?: number } } }[];
+    const scored = rows.filter((r) => typeof r.adGroupCriterion?.qualityInfo?.qualityScore === "number");
+    const avg = scored.length > 0 ? scored.reduce((s, r) => s + (r.adGroupCriterion!.qualityInfo!.qualityScore as number), 0) / scored.length : null;
+    return `${scored.length}/${rows.length} keyword(s) have Quality Score${avg !== null ? ` · avg ${avg.toFixed(1)}/10` : ""}`;
+  });
+
   const adGroups = await probe(async () => {
     const rows = await adsSearch("SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group LIMIT 10");
     return `${rows.length} ad group(s)`;
@@ -95,5 +114,5 @@ export async function GET(req: NextRequest) {
     return `${rows.length} daily row(s) (7d)`;
   });
 
-  return NextResponse.json({ configured, auth, campaigns, adGroups, keywords, searchTerms, assets, recommendations, conversionActions, daily });
+  return NextResponse.json({ configured, auth, campaigns, impressionShare, qualityScore, adGroups, keywords, searchTerms, assets, recommendations, conversionActions, daily });
 }

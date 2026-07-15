@@ -1,4 +1,4 @@
-import { getGoogleAdsOverview } from "@/server/services/google-ads.service";
+import { getGoogleAdsOverview, getCampaignIntelligence } from "@/server/services/google-ads.service";
 import { listCompetitors } from "@/server/services/instagram.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
 import { AdsCompetitorWatch } from "@/components/google-ads/AdsCompetitorWatch";
@@ -10,9 +10,14 @@ import { fmtInt, fmtMoney, fmtPct, shortDate } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function GoogleAdsCampaignsPage() {
-  const [ads, competitors] = await Promise.all([getGoogleAdsOverview(), listCompetitors("GOOGLE_ADS")]);
+  const [ads, intel, competitors] = await Promise.all([
+    getGoogleAdsOverview(),
+    getCampaignIntelligence("LAST_30_DAYS"),
+    listCompetitors("GOOGLE_ADS"),
+  ]);
   const c = ads.campaigns;
   const daily = ads.daily;
+  const healthTone = (s: "healthy" | "warning" | "critical") => (s === "healthy" ? "ok" : s === "warning" ? "warn" : "crit");
 
   const clicksSeries: Point[] = daily.data?.series.map((p) => ({ label: shortDate(p.date), value: p.clicks })) ?? [];
   const costSeries: Point[] = daily.data?.series.map((p) => ({ label: shortDate(p.date), value: p.cost })) ?? [];
@@ -26,6 +31,47 @@ export default async function GoogleAdsCampaignsPage() {
       />
       <GoogleAdsNav />
 
+      {/* Campaign Intelligence (Department 1) */}
+      <Section title="Campaign Intelligence (last 30 days)">
+        {intel.status === "LIVE" && intel.totals ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <StatCard
+                label="Campaign Health"
+                value={`${intel.healthy}✓ · ${intel.warning}! · ${intel.critical}✕`}
+                tone={intel.critical > 0 ? "crit" : intel.warning > 0 ? "warn" : "ok"}
+                hint={`${intel.campaigns.length} campaign(s)`}
+              />
+              <StatCard label="ROAS" value={intel.totals.roas !== null ? `${intel.totals.roas.toFixed(2)}×` : "—"} tone={intel.totals.roas !== null && intel.totals.roas >= 1 ? "ok" : "warn"} hint="conv. value ÷ spend" />
+              <StatCard label="CPA" value={intel.totals.costPerConversion !== null ? fmtMoney(intel.totals.costPerConversion) : "—"} hint="cost per conversion" />
+              <StatCard label="Avg Quality Score" value={intel.qualityScore.avg !== null ? intel.qualityScore.avg.toFixed(1) : "—"} tone={intel.qualityScore.avg !== null && intel.qualityScore.avg < 5 ? "warn" : "default"} hint={`${intel.qualityScore.scored} keyword(s) scored`} />
+              <StatCard label="Impression Share" value={intel.totals.impressionShare !== null ? fmtPct(intel.totals.impressionShare) : "—"} hint="search IS (impr-weighted)" />
+              <StatCard label="Lost IS — Budget" value={intel.totals.lostIsBudget !== null ? fmtPct(intel.totals.lostIsBudget) : "—"} tone={intel.totals.lostIsBudget !== null && intel.totals.lostIsBudget >= 0.1 ? "warn" : "default"} hint="raise budget to recover" />
+              <StatCard label="Lost IS — Rank" value={intel.totals.lostIsRank !== null ? fmtPct(intel.totals.lostIsRank) : "—"} tone={intel.totals.lostIsRank !== null && intel.totals.lostIsRank >= 0.2 ? "warn" : "default"} hint="improve bids/quality" />
+              <StatCard label="Low-QS Keywords" value={fmtInt(intel.qualityScore.low)} tone={intel.qualityScore.low > 0 ? "warn" : "ok"} hint="Quality Score ≤ 4" />
+            </div>
+
+            <Card>
+              <h3 className="mb-2 text-sm font-semibold text-text">Detected problems</h3>
+              {intel.problems.length === 0 ? (
+                <p className="text-sm text-muted">No campaign problems detected — every campaign is healthy this period.</p>
+              ) : (
+                <ul className="divide-y divide-border/60">
+                  {intel.problems.map((p, i) => (
+                    <li key={i} className="flex items-start gap-3 py-2 text-sm">
+                      <Pill tone={p.severity === "critical" ? "crit" : p.severity === "warning" ? "warn" : "info"}>{p.severity}</Pill>
+                      <span className="min-w-0 text-text"><span className="text-muted">{p.campaign}:</span> {p.issue}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        ) : (
+          <WaitingCard title="Campaign intelligence" status={intel.status} reason={intel.reason} />
+        )}
+      </Section>
+
       {/* Campaign Dashboard */}
       <Section title="Campaign Dashboard (last 30 days)">
         {c.status === "LIVE" && c.data ? (
@@ -36,23 +82,29 @@ export default async function GoogleAdsCampaignsPage() {
                   <tr className="text-left text-[11px] uppercase tracking-wider text-muted">
                     <th className="pb-2">Campaign</th>
                     <th className="pb-2 text-right">Status</th>
-                    <th className="pb-2 text-right">Budget/day</th>
-                    <th className="pb-2 text-right">Clicks</th>
-                    <th className="pb-2 text-right">Impr.</th>
                     <th className="pb-2 text-right">Spend</th>
                     <th className="pb-2 text-right">Conv.</th>
+                    <th className="pb-2 text-right">CTR</th>
+                    <th className="pb-2 text-right">CPA</th>
+                    <th className="pb-2 text-right">IS</th>
+                    <th className="pb-2 text-right">Lost·Bgt</th>
+                    <th className="pb-2 text-right">Lost·Rank</th>
+                    <th className="pb-2 text-right">Health</th>
                   </tr>
                 </thead>
                 <tbody>
                   {c.data.rows.map((r, i) => (
                     <tr key={i} className="border-t border-border/60">
-                      <td className="max-w-[220px] truncate py-2 text-text" title={r.campaign}>{r.campaign}</td>
+                      <td className="max-w-[200px] truncate py-2 text-text" title={r.campaign}>{r.campaign}</td>
                       <td className="py-2 text-right"><Pill tone={r.status === "ENABLED" ? "ok" : "muted"}>{r.status || "—"}</Pill></td>
-                      <td className="py-2 text-right text-muted">{r.budget > 0 ? fmtMoney(r.budget) : "—"}</td>
-                      <td className="py-2 text-right text-text">{fmtInt(r.clicks)}</td>
-                      <td className="py-2 text-right text-muted">{fmtInt(r.impressions)}</td>
                       <td className="py-2 text-right text-text">{fmtMoney(r.cost)}</td>
                       <td className="py-2 text-right text-muted">{fmtInt(r.conversions)}</td>
+                      <td className="py-2 text-right text-muted">{r.ctr !== null ? fmtPct(r.ctr) : "—"}</td>
+                      <td className="py-2 text-right text-muted">{r.cpa !== null ? fmtMoney(r.cpa) : "—"}</td>
+                      <td className="py-2 text-right text-muted">{r.impressionShare !== null ? fmtPct(r.impressionShare) : "—"}</td>
+                      <td className="py-2 text-right text-muted">{r.lostIsBudget !== null ? fmtPct(r.lostIsBudget) : "—"}</td>
+                      <td className="py-2 text-right text-muted">{r.lostIsRank !== null ? fmtPct(r.lostIsRank) : "—"}</td>
+                      <td className="py-2 text-right" title={r.health.issues.join(" · ")}><Pill tone={healthTone(r.health.status)}>{r.health.score}</Pill></td>
                     </tr>
                   ))}
                 </tbody>
