@@ -66,8 +66,8 @@ export default async function GoogleAdsDashboard() {
               />
               <StatCard
                 label="Est. Days Remaining"
-                value={budget.estDaysRemaining !== null ? `${Math.floor(budget.estDaysRemaining)}d` : "—"}
-                hint={budget.avgDailySpend7 > 0 ? `at ${fmtMoney(budget.avgDailySpend7)}/day` : "no recent spend"}
+                value={budget.estDaysRemaining !== null ? `${budget.estDaysRemaining >= 365 ? "365+" : Math.floor(budget.estDaysRemaining)}d` : "—"}
+                hint={budget.avgDailySpend7 >= 1 ? `at ${fmtMoney(budget.avgDailySpend7)}/day` : "minimal recent spend"}
               />
             </div>
 

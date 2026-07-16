@@ -728,7 +728,10 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
       }
     : null;
   const avgDailySpend7 = history.slice(0, 7).length > 0 ? last7 / Math.min(7, history.length) : 0;
-  const estDaysRemaining = avgDailySpend7 > 0 && estMonthlyBudget - mtdSpend > 0 ? (estMonthlyBudget - mtdSpend) / avgDailySpend7 : null;
+  // Only forecast burn-down when there is a meaningful daily spend (≥ ₹1/day).
+  // Below that, the account is effectively idle and the projection is noise
+  // (a ₹0.1/day pace would imply a nonsensical multi-thousand-day runway).
+  const estDaysRemaining = avgDailySpend7 >= 1 && estMonthlyBudget - mtdSpend > 0 ? (estMonthlyBudget - mtdSpend) / avgDailySpend7 : null;
 
   const overspending = campaigns.filter((c) => c.budgetStatus === "overspending");
   const underspending = campaigns.filter((c) => c.budgetStatus === "underspending");
