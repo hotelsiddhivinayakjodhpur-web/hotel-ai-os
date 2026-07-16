@@ -232,7 +232,7 @@ export function buildAdCopyPack(input: AdCopyInput): AdCopyPack {
 }
 
 /** Promotion extension lines from operator input (never invents a discount). */
-export function renderPromotion(p?: PromotionInput): string[] | null {
+function renderPromotion(p?: PromotionInput): string[] | null {
   if (!p || (!p.occasion && !p.discountValue && !p.promoCode)) return null;
   const discount = p.discountValue?.trim()
     ? p.discountType === "amount"
@@ -249,7 +249,7 @@ export function renderPromotion(p?: PromotionInput): string[] | null {
 }
 
 /** Local, deterministic ad-strength estimate (NOT Google's official metric). */
-export function scoreAdStrength(pack: { headlines: string[]; descriptions: string[]; callouts: string[]; structuredSnippet: StructuredSnippet }): AdStrength {
+function scoreAdStrength(pack: { headlines: string[]; descriptions: string[]; callouts: string[]; structuredSnippet: StructuredSnippet }): AdStrength {
   let score = 0;
   const tips: string[] = [];
   if (pack.headlines.length >= 12) score += 35;
