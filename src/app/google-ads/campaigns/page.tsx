@@ -1,5 +1,5 @@
 import { getGoogleAdsOverview, getCampaignIntelligence } from "@/server/services/google-ads.service";
-import { listCompetitors } from "@/server/services/instagram.service";
+import { listCompetitors } from "@/server/services/competitor.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
 import { AdsCompetitorWatch } from "@/components/google-ads/AdsCompetitorWatch";
 import { WaitingCard } from "@/components/gbp/WaitingCard";

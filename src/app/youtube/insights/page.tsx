@@ -1,5 +1,5 @@
 import { getYouTubeOverview } from "@/server/services/youtube.service";
-import { listCompetitors } from "@/server/services/instagram.service";
+import { listCompetitors } from "@/server/services/competitor.service";
 import { YouTubeNav } from "@/components/youtube/YouTubeNav";
 import { YtCompetitorWatch } from "@/components/youtube/YtCompetitorWatch";
 import { WaitingCard } from "@/components/gbp/WaitingCard";

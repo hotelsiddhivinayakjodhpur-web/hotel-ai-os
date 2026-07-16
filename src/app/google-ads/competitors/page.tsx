@@ -1,6 +1,8 @@
 import { getCompetitorIntelligence } from "@/server/services/google-ads.service";
+import { getCompetitorDiscovery } from "@/server/services/competitor-discovery.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
 import { CompetitorRegistry } from "@/components/google-ads/CompetitorRegistry";
+import { CompetitorDiscovery } from "@/components/google-ads/CompetitorDiscovery";
 import { RecommendationList } from "@/components/google-ads/RecommendationList";
 import { Card, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { fmtInt, fmtPct } from "@/lib/format";
@@ -8,7 +10,7 @@ import { fmtInt, fmtPct } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function GoogleAdsCompetitorsPage() {
-  const ci = await getCompetitorIntelligence("LAST_30_DAYS");
+  const [ci, discovery] = await Promise.all([getCompetitorIntelligence("LAST_30_DAYS"), getCompetitorDiscovery()]);
   const live = ci.mode === "LIVE_AUCTION";
 
   return (
@@ -51,8 +53,13 @@ export default async function GoogleAdsCompetitorsPage() {
         </Section>
       )}
 
-      {/* Competitor registry (Mode B backbone) */}
-      <Section title="Competitor Registry">
+      {/* AI-assisted discovery — proposes only; owner approves */}
+      <Section title="AI-Assisted Discovery">
+        <CompetitorDiscovery discovery={discovery} />
+      </Section>
+
+      {/* Competitor registry (shared Hotel AI OS service) */}
+      <Section title="Competitor Registry (shared across the OS)">
         <CompetitorRegistry coverage={ci.coverage} />
       </Section>
 

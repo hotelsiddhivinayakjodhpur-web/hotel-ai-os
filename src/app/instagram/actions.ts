@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addCompetitorNote } from "@/server/services/instagram.service";
+import { addCompetitorNote } from "@/server/services/competitor.service";
 
 /** Server action: record a manual competitor observation. */
 export async function addCompetitorAction(input: {

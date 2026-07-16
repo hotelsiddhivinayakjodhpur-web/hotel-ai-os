@@ -1,4 +1,5 @@
-import { getInstagramOverview, listCompetitors } from "@/server/services/instagram.service";
+import { getInstagramOverview } from "@/server/services/instagram.service";
+import { listCompetitors } from "@/server/services/competitor.service";
 import { InstagramNav } from "@/components/instagram/InstagramNav";
 import { CompetitorWatch } from "@/components/instagram/CompetitorWatch";
 import { WaitingCard } from "@/components/gbp/WaitingCard";

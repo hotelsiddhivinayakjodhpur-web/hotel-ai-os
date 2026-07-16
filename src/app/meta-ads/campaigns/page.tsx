@@ -1,5 +1,5 @@
 import { getMetaAdsOverview } from "@/server/services/meta-ads.service";
-import { listCompetitors } from "@/server/services/instagram.service";
+import { listCompetitors } from "@/server/services/competitor.service";
 import { MetaAdsNav } from "@/components/meta-ads/MetaAdsNav";
 import { MetaCompetitorWatch } from "@/components/meta-ads/MetaCompetitorWatch";
 import { WaitingCard } from "@/components/gbp/WaitingCard";

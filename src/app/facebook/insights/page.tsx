@@ -1,5 +1,5 @@
 import { getFacebookOverview } from "@/server/services/facebook.service";
-import { listCompetitors } from "@/server/services/instagram.service";
+import { listCompetitors } from "@/server/services/competitor.service";
 import { FacebookNav } from "@/components/facebook/FacebookNav";
 import { FbCompetitorWatch } from "@/components/facebook/FbCompetitorWatch";
 import { WaitingCard } from "@/components/gbp/WaitingCard";

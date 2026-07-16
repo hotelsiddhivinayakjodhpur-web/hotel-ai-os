@@ -10,7 +10,7 @@ import {
   type AdsDatePreset,
 } from "@/server/integrations/google-ads-client";
 import { listContent } from "./content.service";
-import { listCompetitors } from "./instagram.service";
+import { getCompetitorCoverage, type CompetitorChannel, type CompetitorChannelCoverage } from "./competitor.service";
 import { getSeoReport } from "./seo.service";
 
 const log = logger.child({ component: "google-ads-service" });
@@ -1405,22 +1405,9 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
 // never come from the API; it comes from the operator's registry. What the API does
 // give us is our own share and how much of it we lose to competitors outranking us.
 
-export type CompetitorChannel = "GOOGLE_ADS" | "GOOGLE_SEARCH" | "GOOGLE_MAPS" | "OTA" | "LOCAL_HOTEL";
-
-export const COMPETITOR_CHANNELS: { id: CompetitorChannel; label: string; hint: string }[] = [
-  { id: "GOOGLE_ADS", label: "Google Ads", hint: "Advertisers seen on your search terms" },
-  { id: "GOOGLE_SEARCH", label: "Google Search", hint: "Hotels outranking you organically" },
-  { id: "GOOGLE_MAPS", label: "Google Maps", hint: "Nearby hotels in the local pack" },
-  { id: "OTA", label: "OTA", hint: "Booking.com / MakeMyTrip / Agoda listings" },
-  { id: "LOCAL_HOTEL", label: "Local hotels", hint: "Direct rivals in the city" },
-];
-
-export interface CompetitorEntry {
-  channel: CompetitorChannel;
-  name: string;
-  note: string | null;
-  recordedAt: string;
-}
+/** Channels this department surfaces. The registry itself is the SHARED
+ *  competitor.service — Google Ads AI owns no competitor storage or taxonomy. */
+const ADS_COMPETITOR_CHANNELS: CompetitorChannel[] = ["GOOGLE_ADS", "GOOGLE_SEARCH", "GOOGLE_MAPS", "OTA", "LOCAL_HOTEL"];
 
 export interface AuctionInsightsStatus {
   available: boolean;
@@ -1436,14 +1423,6 @@ export interface ContestedQuery {
   clicks: number;
   impressions: number;
   position: number | null;
-}
-
-export interface CompetitorChannelCoverage {
-  channel: CompetitorChannel;
-  label: string;
-  hint: string;
-  count: number;
-  entries: CompetitorEntry[];
 }
 
 export interface CompetitorIntelligence {
@@ -1465,25 +1444,15 @@ export async function getCompetitorIntelligence(preset: AdsDatePreset = "LAST_30
 async function buildCompetitorIntelligence(preset: AdsDatePreset): Promise<CompetitorIntelligence> {
   // Registry + organic queries work with or without the Ads API, so they are
   // fetched regardless of whether Google Ads is connected.
-  const [campRes, isRes, seoRes, ...channelRes] = await Promise.allSettled([
+  const [campRes, isRes, seoRes, coverageRes] = await Promise.allSettled([
     adsConfigured() ? getCampaigns(preset) : Promise.resolve<AdsCampaignsData | null>(null),
     adsConfigured() ? getImpressionShare(preset) : Promise.resolve(new Map<string, CampaignIsRow>()),
     getSeoReport(),
-    ...COMPETITOR_CHANNELS.map((c) => listCompetitors(c.id)),
+    getCompetitorCoverage(ADS_COMPETITOR_CHANNELS),
   ]);
 
-  // ── Competitor registry (shared CompetitorNote table — no new storage) ──
-  const coverage: CompetitorChannelCoverage[] = COMPETITOR_CHANNELS.map((c, i) => {
-    const res = channelRes[i];
-    const rows = res && res.status === "fulfilled" ? res.value : [];
-    return {
-      channel: c.id,
-      label: c.label,
-      hint: c.hint,
-      count: rows.length,
-      entries: rows.map((r) => ({ channel: c.id, name: r.handle, note: r.note, recordedAt: r.recordedAt })),
-    };
-  });
+  // ── Competitor registry — read from the SHARED competitor.service ──
+  const coverage: CompetitorChannelCoverage[] = coverageRes.status === "fulfilled" ? coverageRes.value : [];
   const totalCompetitors = coverage.reduce((s, c) => s + c.count, 0);
 
   // ── Real organic queries we already compete on (Search Console) ──

@@ -1,6 +1,5 @@
 import { cached, TTL } from "@/lib/cache";
 import { env } from "@/lib/env";
-import { prisma } from "@/lib/prisma";
 import {
   igConfigured,
   graphGet,
@@ -10,7 +9,6 @@ import {
   type GraphInsightsResponse,
 } from "@/server/integrations/meta-graph-client";
 import { listContent } from "./content.service";
-import { safeDb } from "./db-guard";
 
 /**
  * Instagram AI — data layer. Consumes:
@@ -18,7 +16,7 @@ import { safeDb } from "./db-guard";
  *    single content source, adapted not regenerated;
  *  - Official Instagram Graph API via meta-graph-client for live analytics —
  *    every section degrades to "Waiting for Production Connection" honestly;
- *  - CompetitorNote (manual mode) for competitor watch.
+ *  - Competitor watch now lives in the shared competitor.service.
  */
 export type IgSectionStatus = "LIVE" | "WAITING" | "NOT_CONFIGURED";
 
@@ -276,47 +274,4 @@ async function buildOverview(): Promise<InstagramOverview> {
   return { profile, daily, media, queue, recommendations };
 }
 
-// ── Competitor Watch (manual mode) ──────────────────────────────────────────
-export interface CompetitorView {
-  handle: string;
-  latestFollowers: number | null;
-  previousFollowers: number | null;
-  note: string | null;
-  recordedAt: string;
-}
-
-export async function listCompetitors(platform = "INSTAGRAM"): Promise<CompetitorView[]> {
-  const rows = await safeDb(
-    () => prisma.competitorNote.findMany({ where: { platform }, orderBy: { recordedAt: "desc" }, take: 200 }),
-    [],
-  );
-  const byHandle = new Map<string, typeof rows>();
-  for (const r of rows) {
-    const arr = byHandle.get(r.handle) ?? [];
-    arr.push(r);
-    byHandle.set(r.handle, arr);
-  }
-  return [...byHandle.entries()].map(([handle, entries]) => ({
-    handle,
-    latestFollowers: entries[0]?.followers ?? null,
-    previousFollowers: entries[1]?.followers ?? null,
-    note: entries[0]?.note ?? null,
-    recordedAt: entries[0]!.recordedAt.toISOString(),
-  }));
-}
-
-export async function addCompetitorNote(input: { platform?: string; handle: string; followers?: number | null; note?: string | null }): Promise<boolean> {
-  const r = await safeDb(
-    () =>
-      prisma.competitorNote.create({
-        data: {
-          platform: input.platform ?? "INSTAGRAM",
-          handle: input.handle.trim().replace(/^@/, ""),
-          followers: input.followers ?? null,
-          note: input.note?.trim() || null,
-        },
-      }),
-    null,
-  );
-  return r !== null;
-}
+// Competitor Watch lives in the shared competitor.service (single source of truth).

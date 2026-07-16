@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addAdsCompetitorAction } from "@/app/google-ads/actions";
-import type { CompetitorView } from "@/server/services/instagram.service";
+import type { CompetitorView } from "@/server/services/competitor.service";
 import { Pill } from "@/components/ui/primitives";
 
 /**

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 // Reuses the shared competitor service (CompetitorNote table) — platform-scoped.
-import { addCompetitorNote } from "@/server/services/instagram.service";
+import { addCompetitorNote } from "@/server/services/competitor.service";
 
 /** Server action: record a manual Meta Ads competitor observation. */
 export async function addMetaAdsCompetitorAction(input: {

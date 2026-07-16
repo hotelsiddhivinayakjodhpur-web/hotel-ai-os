@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addCompetitorForChannelAction } from "@/app/google-ads/actions";
-import type { CompetitorChannel, CompetitorChannelCoverage } from "@/server/services/google-ads.service";
+import type { CompetitorChannel, CompetitorChannelCoverage } from "@/server/services/competitor.service";
 import { Card, Pill } from "@/components/ui/primitives";
 import { inputCls, btnCls, chipCls } from "./adsForm";
 
