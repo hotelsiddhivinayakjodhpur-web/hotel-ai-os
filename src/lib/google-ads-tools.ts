@@ -91,50 +91,93 @@ export interface AdCopyInput {
 // Per-theme seed phrases. Every phrase is either a verified fact (location,
 // hospitality, book-direct) or an [OPERATOR: …] placeholder — never an unverified
 // amenity, price or rating.
+// Every seed below is authored to FIT its Google limit, so clamping never has to
+// cut one — in particular an [OPERATOR: …] placeholder must never be split (a
+// half-placeholder like "[OPERATOR: e.g. Free" is meaningless in an ad). Operator
+// guidance lives in `notes`/promotion lines, which are not length-limited.
 const THEME_SEEDS: Record<AdCopyTheme, { headlines: string[]; descriptions: string[]; callouts: string[]; path2: string }> = {
   generic: {
     headlines: ["Book Direct & Save", `Comfortable ${HOTEL.city} Stay`, `Near ${HOTEL.city} Attractions`, "Warm Rajasthani Welcome"],
     descriptions: [`Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`],
-    callouts: ["Book Direct for Best Rate", "Warm Rajasthani Hospitality", "Heart of the Blue City"],
+    callouts: ["Book Direct for Best Rate", "Warm Rajasthani Welcome", "Heart of the Blue City", "Near Top Attractions"],
     path2: "direct",
   },
   "hotel-offer": {
-    headlines: ["Special Hotel Offer", "Best Direct Rate", "Save Booking Direct", "Limited-Time Room Deal"],
-    descriptions: [`Book ${HOTEL.name} direct for our best available rate — no OTA fees. [OPERATOR: add your offer].`],
-    callouts: ["Best Direct Rate", "No Booking Fees", "[OPERATOR: e.g. Free Cancellation]"],
+    headlines: ["Special Hotel Offer", "Best Direct Rate", "Save Booking Direct", "Limited-Time Room Deal", "Book Direct, Pay Less"],
+    descriptions: [
+      `Book ${HOTEL.name} direct for our best available rate — no OTA fees.`,
+      `Stay in the heart of the Blue City. Book direct for our best available rate.`,
+    ],
+    callouts: ["Best Direct Rate", "No Booking Fees", "Book Direct & Save", "Near Top Attractions"],
     path2: "offers",
   },
   festival: {
-    headlines: [`Festival Stay in ${HOTEL.city}`, "Celebrate in the Blue City", "Festive Season Rooms", "[OPERATOR: festival] Getaway"],
-    descriptions: [`Spend [OPERATOR: festival] at ${HOTEL.name} in ${HOTEL.city}. Book direct for the best rate.`],
-    callouts: ["Festive Season Stay", "Book Direct & Save", "[OPERATOR: festival dates]"],
+    headlines: [`Festival Stay in ${HOTEL.city}`, "Celebrate in the Blue City", "Festive Season Rooms", `Festival Getaway ${HOTEL.city}`, "Book Your Festive Stay"],
+    descriptions: [
+      `Spend the festive season at ${HOTEL.name} in ${HOTEL.city}. Book direct.`,
+      `Celebrate in the Blue City — comfortable rooms, warm Rajasthani hospitality.`,
+    ],
+    callouts: ["Festive Season Stay", "Book Direct & Save", "Heart of the Blue City", "Near Top Attractions"],
     path2: "festival",
   },
   weekend: {
-    headlines: [`Weekend Getaway ${HOTEL.city}`, "Plan Your Weekend", "Short Break in Jodhpur", "Weekend Rooms Available"],
-    descriptions: [`Plan a weekend at ${HOTEL.name} — explore the Blue City, book direct for the best rate.`],
-    callouts: ["Weekend Getaway", "Book Direct & Save", "Explore the Blue City"],
+    headlines: [`Weekend Getaway ${HOTEL.city}`, "Plan Your Weekend", `Short Break in ${HOTEL.city}`, "Weekend Rooms Available", "Escape for the Weekend"],
+    descriptions: [
+      `Plan a weekend at ${HOTEL.name} — explore the Blue City. Book direct.`,
+      `A short break in ${HOTEL.city}: forts, markets and warm hospitality. Book direct.`,
+    ],
+    callouts: ["Weekend Getaway", "Book Direct & Save", "Explore the Blue City", "Near Top Attractions"],
     path2: "weekend",
   },
   "family-room": {
-    headlines: [`Family Rooms in ${HOTEL.city}`, "Family Stay Jodhpur", "Room for the Family", "Family Trip to Jodhpur"],
-    descriptions: [`Family-friendly rooms at ${HOTEL.name}, close to ${HOTEL.city}'s top sights. Book direct.`],
-    callouts: ["Family-Friendly Stay", "Near Top Attractions", "[OPERATOR: family room details]"],
+    headlines: [`Family Rooms in ${HOTEL.city}`, `Family Stay ${HOTEL.city}`, "Room for the Family", `Family Trip to ${HOTEL.city}`, "Family-Friendly Hotel"],
+    descriptions: [
+      `Family-friendly rooms at ${HOTEL.name}, close to ${HOTEL.city}'s top sights.`,
+      `Bring the family to the Blue City. Book direct for our best available rate.`,
+    ],
+    callouts: ["Family-Friendly Stay", "Near Top Attractions", "Book Direct & Save", "Heart of the Blue City"],
     path2: "family",
   },
   "business-travel": {
-    headlines: [`Business Stay ${HOTEL.city}`, "Corporate Stay Jodhpur", "Work Trip to Jodhpur", "Convenient Jodhpur Base"],
-    descriptions: [`A convenient ${HOTEL.city} base for work travel at ${HOTEL.name}. Book direct for the best rate.`],
-    callouts: ["Convenient Location", "Book Direct & Save", "[OPERATOR: e.g. Fast Wi-Fi]"],
+    headlines: [`Business Stay ${HOTEL.city}`, `Corporate Stay ${HOTEL.city}`, `Work Trip to ${HOTEL.city}`, `Convenient ${HOTEL.city} Base`, "Business Travel Hotel"],
+    descriptions: [
+      `A convenient ${HOTEL.city} base for work travel at ${HOTEL.name}.`,
+      `Business stay in ${HOTEL.city} — comfortable rooms, easy access. Book direct.`,
+    ],
+    callouts: ["Convenient Location", "Book Direct & Save", "Near Top Attractions", "Heart of the Blue City"],
     path2: "business",
   },
 };
 
-const BASE_HEADLINES = [HOTEL.name, `Hotel in ${HOTEL.city}`, `Stay in ${HOTEL.city}`, "Near Mehrangarh Fort"];
-const BASE_DESCRIPTION = `${HOTEL.name} in ${HOTEL.city} — comfortable rooms, warm hospitality. Book direct for the best rate.`;
+const BASE_HEADLINES = [
+  HOTEL.name,
+  `Hotel in ${HOTEL.city}`,
+  `Stay in ${HOTEL.city}`,
+  "Near Mehrangarh Fort",
+  "Book Direct & Save",
+  "Warm Rajasthani Welcome",
+  `Comfortable ${HOTEL.city} Stay`,
+  "Blue City Hotel Stay",
+];
+const BASE_DESCRIPTIONS = [
+  `${HOTEL.name} in ${HOTEL.city} — comfortable rooms, warm hospitality. Book direct.`,
+  `Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`,
+];
+
+/** True when every "[" has a matching "]" — guards against a clamped placeholder. */
+function balancedBrackets(s: string): boolean {
+  return (s.match(/\[/g) ?? []).length === (s.match(/\]/g) ?? []).length;
+}
 
 function dedupClamp(candidates: string[], max: number, minLen: number, take: number): string[] {
-  return [...new Set(candidates.map((c) => clamp(c, max)).filter((c) => c.length >= minLen && c.length <= max))].slice(0, take);
+  return [
+    ...new Set(
+      candidates
+        .map((c) => clamp(c, max))
+        // Reject anything whose clamp broke a placeholder mid-way.
+        .filter((c) => c.length >= minLen && c.length <= max && balancedBrackets(c)),
+    ),
+  ].slice(0, take);
 }
 
 /** Full RSA asset pack for a theme, optionally enriched by a Content AI draft. */
@@ -152,7 +195,7 @@ export function buildAdCopyPack(input: AdCopyInput): AdCopyPack {
     15,
   );
   const descriptions = dedupClamp(
-    [...seed.descriptions, BASE_DESCRIPTION, ...sourceLines],
+    [...seed.descriptions, ...BASE_DESCRIPTIONS, ...sourceLines],
     AD_LIMITS.description,
     25,
     4,
@@ -182,6 +225,7 @@ export function buildAdCopyPack(input: AdCopyInput): AdCopyPack {
       `Final URL: ${HOTEL.website}${theme === "family-room" ? "/rooms" : ""} (match the landing page to the ad group).`,
       `Google limits (pre-clamped): headline ≤${AD_LIMITS.headline}, description ≤${AD_LIMITS.description}, callout ≤${AD_LIMITS.callout}, path ≤${AD_LIMITS.path}.`,
       "Ad Strength here is a local checklist estimate — Google's official Ad Strength shows in the Ads editor once assets are entered.",
+      "[OPERATOR: add callouts for any amenity you can confirm (e.g. free cancellation, Wi-Fi) — we only ship claims verified in hotel-facts.]",
       "[OPERATOR: verify every claim before publishing; no prices, discounts, dates or ratings unless confirmed today.]",
     ],
   };
