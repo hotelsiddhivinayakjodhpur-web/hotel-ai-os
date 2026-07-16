@@ -117,5 +117,18 @@ export async function GET(req: NextRequest) {
     return `${rows.length} daily row(s) (7d)`;
   });
 
-  return NextResponse.json({ configured, auth, campaigns, impressionShare, qualityScore, adGroups, keywords, searchTerms, assets, recommendations, conversionActions, daily });
+  // Budget Optimization (Department 2) — confirm campaign daily budgets are readable.
+  const budget = await probe(async () => {
+    const rows = (await adsSearch(
+      "SELECT campaign.name, campaign_budget.amount_micros, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date DURING LAST_30_DAYS ORDER BY campaign_budget.amount_micros DESC LIMIT 25",
+    )) as { campaign?: { name?: string }; campaignBudget?: { amountMicros?: string }; metrics?: { costMicros?: string } }[];
+    const withBudget = rows.filter((r) => Number(r.campaignBudget?.amountMicros ?? 0) > 0);
+    const totalDaily = withBudget.reduce((s, r) => s + fromMicros(r.campaignBudget?.amountMicros), 0);
+    const top = withBudget[0];
+    return rows.length === 0
+      ? "0 campaigns (no budget data for period)"
+      : `${withBudget.length}/${rows.length} campaign(s) have a daily budget · total ₹${totalDaily.toFixed(0)}/day${top ? ` · top "${top.campaign?.name}" ₹${fromMicros(top.campaignBudget?.amountMicros).toFixed(0)}/day` : ""}`;
+  });
+
+  return NextResponse.json({ configured, auth, campaigns, impressionShare, qualityScore, adGroups, keywords, searchTerms, assets, recommendations, conversionActions, daily, budget });
 }

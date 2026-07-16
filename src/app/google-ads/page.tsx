@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getGoogleAdsOverview } from "@/server/services/google-ads.service";
+import { getGoogleAdsOverview, getBudgetOptimization } from "@/server/services/google-ads.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
 import { WaitingCard } from "@/components/gbp/WaitingCard";
 import { Card, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
@@ -7,8 +7,11 @@ import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+const budgetTone = (s: string) =>
+  s === "overspending" ? "crit" : s === "constrained" ? "warn" : s === "underspending" ? "info" : s === "no_budget" ? "muted" : "ok";
+
 export default async function GoogleAdsDashboard() {
-  const ads = await getGoogleAdsOverview();
+  const [ads, budget] = await Promise.all([getGoogleAdsOverview(), getBudgetOptimization("LAST_30_DAYS")]);
   const c = ads.campaigns;
   const totals = c.data?.totals ?? null;
 
@@ -41,6 +44,101 @@ export default async function GoogleAdsDashboard() {
           </div>
         ) : (
           <WaitingCard title="Campaign totals" status={c.status} reason={c.reason} />
+        )}
+      </Section>
+
+      {/* Budget Optimization (Department 2) */}
+      <Section title="Budget Optimization">
+        {budget.status === "LIVE" ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <StatCard label="Total Daily Budget" value={fmtMoney(budget.totalDailyBudget)} hint={`≈ ${fmtMoney(budget.estMonthlyBudget)}/mo`} />
+              <StatCard
+                label="Month-to-date Spend"
+                value={fmtMoney(budget.mtdSpend)}
+                hint={budget.historyDays > 0 ? `day ${budget.daysElapsed}, ${budget.daysRemainingInMonth} left` : "no sync history yet"}
+              />
+              <StatCard
+                label="Projected Month Spend"
+                value={budget.projectedMonthSpend !== null ? fmtMoney(budget.projectedMonthSpend) : "—"}
+                tone={budget.monthUtilization !== null && budget.monthUtilization > 1 ? "crit" : budget.monthUtilization !== null && budget.monthUtilization > 0.85 ? "warn" : "ok"}
+                hint={budget.monthUtilization !== null ? `${fmtPct(budget.monthUtilization)} of est. budget` : "needs history"}
+              />
+              <StatCard
+                label="Est. Days Remaining"
+                value={budget.estDaysRemaining !== null ? `${Math.floor(budget.estDaysRemaining)}d` : "—"}
+                hint={budget.avgDailySpend7 > 0 ? `at ${fmtMoney(budget.avgDailySpend7)}/day` : "no recent spend"}
+              />
+            </div>
+
+            {budget.spendTrend && (
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <StatCard
+                  label="Spend Trend (7d vs prior 7d)"
+                  value={budget.spendTrend.changePct !== null ? `${budget.spendTrend.changePct >= 0 ? "+" : ""}${fmtPct(budget.spendTrend.changePct)}` : budget.spendTrend.direction}
+                  tone={budget.spendTrend.direction === "down" ? "warn" : budget.spendTrend.direction === "up" ? "info" : "default"}
+                  hint={`${fmtMoney(budget.spendTrend.last7)} vs ${fmtMoney(budget.spendTrend.prev7)}`}
+                />
+                <StatCard label="Over-spending" value={fmtInt(budget.overspending.length)} tone={budget.overspending.length > 0 ? "crit" : "ok"} hint="campaign(s) > 110% budget" />
+                <StatCard label="Under-spending" value={fmtInt(budget.underspending.length)} tone={budget.underspending.length > 0 ? "warn" : "ok"} hint="campaign(s) < 50% budget" />
+                <StatCard label="Budget History" value={`${budget.historyDays}d`} hint="from daily Google Ads sync" />
+              </div>
+            )}
+
+            {(budget.alerts.length > 0 || budget.recommendations.length > 0) && (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {[...budget.alerts, ...budget.recommendations].map((r, i) => (
+                  <Card key={i}>
+                    <div className="flex items-start gap-3">
+                      <Pill tone={r.priority === "high" ? "crit" : r.priority === "medium" ? "warn" : "muted"}>{r.priority}</Pill>
+                      <div>
+                        <div className="text-sm font-medium text-text">{r.title}</div>
+                        <div className="text-xs text-muted">{r.detail}</div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            <Card>
+              <h3 className="mb-2 text-sm font-semibold text-text">Per-campaign budget analysis</h3>
+              {budget.campaigns.length === 0 ? (
+                <p className="text-sm text-muted">No campaigns with budget data this period.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] uppercase tracking-wider text-muted">
+                        <th className="pb-2">Campaign</th>
+                        <th className="pb-2 text-right">Daily Budget</th>
+                        <th className="pb-2 text-right">Avg/day</th>
+                        <th className="pb-2 text-right">Utilization</th>
+                        <th className="pb-2 text-right">Conv.</th>
+                        <th className="pb-2 text-right">Opportunity</th>
+                        <th className="pb-2 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {budget.campaigns.map((r, i) => (
+                        <tr key={i} className="border-t border-border/60">
+                          <td className="max-w-[200px] truncate py-2 text-text" title={r.recommendation ?? r.campaign}>{r.campaign}</td>
+                          <td className="py-2 text-right text-text">{fmtMoney(r.dailyBudget)}</td>
+                          <td className="py-2 text-right text-muted">{fmtMoney(r.avgDailySpend)}</td>
+                          <td className="py-2 text-right text-muted">{r.utilization !== null ? fmtPct(r.utilization) : "—"}</td>
+                          <td className="py-2 text-right text-muted">{fmtInt(r.conversions)}</td>
+                          <td className="py-2 text-right text-muted">{r.opportunityScore}</td>
+                          <td className="py-2 text-right"><Pill tone={budgetTone(r.budgetStatus)}>{r.budgetStatus.replace("_", " ")}</Pill></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        ) : (
+          <WaitingCard title="Budget optimization" status={budget.status} reason={budget.reason} />
         )}
       </Section>
 

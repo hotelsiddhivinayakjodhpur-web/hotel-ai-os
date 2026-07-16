@@ -78,6 +78,10 @@ const schema = z.object({
   // Google Business Profile / Ads / YouTube
   // Reserved for the official GBP API migration (pending Google approval).
   GBP_ACCOUNT_ID: optionalStr,
+  // GBP OAuth (business.manage) — used by the /api/gbp/validate auth test.
+  GBP_CLIENT_ID: optionalStr,
+  GBP_CLIENT_SECRET: optionalStr,
+  GBP_REFRESH_TOKEN: optionalStr,
   GOOGLE_ADS_CUSTOMER_ID: optionalStr,
   GOOGLE_ADS_DEVELOPER_TOKEN: optionalStr,
   // Google Ads official API OAuth (google-ads-client.ts)

@@ -1,4 +1,5 @@
 import { cached, TTL } from "@/lib/cache";
+import { prisma } from "@/lib/prisma";
 import {
   adsConfigured,
   adsSearch,
@@ -557,6 +558,225 @@ async function buildCampaignIntelligence(preset: AdsDatePreset): Promise<Campaig
     healthy: rows.filter((r) => r.health.status === "healthy").length,
     warning: rows.filter((r) => r.health.status === "warning").length,
     critical: rows.filter((r) => r.health.status === "critical").length,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// ── Budget Optimization (Department 2) ──────────────────────────────────────
+// Reuses getCampaigns (daily budget + period spend + utilization) and READS the
+// existing account-level GoogleAdsDaily table (populated by the /api/google-ads/sync
+// cron, previously unused by any read path) for month-to-date, trend and forecast.
+// No new table, no schema change, no cron change; read-only.
+
+export type BudgetStatus = "healthy" | "overspending" | "underspending" | "constrained" | "no_budget";
+
+export interface BudgetCampaignRow {
+  campaign: string;
+  status: string;
+  dailyBudget: number;
+  spend: number; // period spend
+  avgDailySpend: number;
+  utilization: number | null; // avgDailySpend ÷ daily budget
+  conversions: number;
+  roas: number | null;
+  budgetStatus: BudgetStatus;
+  opportunityScore: number; // 0-100 — scaling opportunity (constrained + efficient)
+  recommendation: string | null;
+}
+
+export interface BudgetSpendTrend {
+  last7: number;
+  prev7: number;
+  changePct: number | null;
+  direction: "up" | "down" | "flat";
+}
+
+export interface BudgetOptimization {
+  status: AdsSectionStatus;
+  reason?: string;
+  totalDailyBudget: number;
+  estMonthlyBudget: number; // daily × 30.4
+  mtdSpend: number; // month-to-date, from GoogleAdsDaily
+  projectedMonthSpend: number | null;
+  monthUtilization: number | null; // projected ÷ est monthly budget
+  daysElapsed: number;
+  daysRemainingInMonth: number;
+  avgDailySpend7: number;
+  estDaysRemaining: number | null; // remaining monthly budget ÷ avg daily spend
+  spendTrend: BudgetSpendTrend | null;
+  historyDays: number;
+  campaigns: BudgetCampaignRow[];
+  overspending: BudgetCampaignRow[];
+  underspending: BudgetCampaignRow[];
+  recommendations: AdsRecommendation[];
+  alerts: AdsRecommendation[];
+  generatedAt: string;
+}
+
+interface DailySpendRow {
+  date: Date;
+  cost: number;
+}
+
+/** Read account-level daily spend history from GoogleAdsDaily (guarded). */
+async function readSpendHistory(): Promise<DailySpendRow[]> {
+  try {
+    const rows = await prisma.googleAdsDaily.findMany({ orderBy: { date: "desc" }, take: 40, select: { date: true, costMicros: true } });
+    return rows.map((r) => ({ date: r.date, cost: Number(r.costMicros) / 1_000_000 }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getBudgetOptimization(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<BudgetOptimization> {
+  return cached(`google-ads:budget:${preset}`, TTL.medium, () => buildBudgetOptimization(preset));
+}
+
+async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOptimization> {
+  const empty: BudgetOptimization = {
+    status: "NOT_CONFIGURED",
+    totalDailyBudget: 0,
+    estMonthlyBudget: 0,
+    mtdSpend: 0,
+    projectedMonthSpend: null,
+    monthUtilization: null,
+    daysElapsed: 0,
+    daysRemainingInMonth: 0,
+    avgDailySpend7: 0,
+    estDaysRemaining: null,
+    spendTrend: null,
+    historyDays: 0,
+    campaigns: [],
+    overspending: [],
+    underspending: [],
+    recommendations: [],
+    alerts: [],
+    generatedAt: new Date().toISOString(),
+  };
+  if (!adsConfigured()) return { ...empty, reason: "Google Ads API not connected (set GOOGLE_ADS_* env vars)." };
+
+  const [campRes, history] = await Promise.all([getCampaigns(preset).catch((e) => e as Error), readSpendHistory()]);
+  if (campRes instanceof Error) return { ...empty, status: "WAITING", reason: failReason(campRes) };
+  const { rows } = campRes;
+  if (rows.length === 0) return { ...empty, status: "WAITING", reason: "No campaign data returned yet (account may have no active campaigns)." };
+
+  const days = presetDays(preset);
+
+  // Per-campaign budget analysis.
+  const campaigns: BudgetCampaignRow[] = rows.map((r) => {
+    const avgDailySpend = r.cost / days;
+    const util = r.budgetUtilization;
+    let budgetStatus: BudgetStatus;
+    if (r.budget <= 0) budgetStatus = "no_budget";
+    else if (util != null && util > 1.1) budgetStatus = "overspending";
+    else if ((util != null && util >= 0.9 && r.conversions > 0) || (r.lostIsBudget != null && r.lostIsBudget >= 0.1)) budgetStatus = "constrained";
+    else if (util != null && util < 0.5) budgetStatus = "underspending";
+    else budgetStatus = "healthy";
+
+    let opportunityScore = 0;
+    if (util != null && util >= 0.9) opportunityScore += 40;
+    if (r.lostIsBudget != null && r.lostIsBudget >= 0.1) opportunityScore += 30;
+    if (r.conversions > 0) opportunityScore += 20;
+    if (r.roas != null && r.roas >= 1) opportunityScore += 10;
+    opportunityScore = Math.min(100, opportunityScore);
+
+    let recommendation: string | null = null;
+    if (budgetStatus === "overspending") recommendation = `Averaging ${util != null ? (util * 100).toFixed(0) : "—"}% of the daily budget — review or cap.`;
+    else if (budgetStatus === "constrained") recommendation = r.conversions > 0 ? `Budget-limited and converting — consider raising the daily budget to capture more.` : `Fully using its budget — verify it is converting before scaling.`;
+    else if (budgetStatus === "underspending") recommendation = `Using only ${util != null ? (util * 100).toFixed(0) : "—"}% of budget — reallocate or tighten targeting.`;
+
+    return {
+      campaign: r.campaign,
+      status: r.status,
+      dailyBudget: r.budget,
+      spend: r.cost,
+      avgDailySpend,
+      utilization: util,
+      conversions: r.conversions,
+      roas: r.roas,
+      budgetStatus,
+      opportunityScore,
+      recommendation,
+    };
+  });
+
+  // Account-level budget + forecast (uses real daily spend history).
+  const totalDailyBudget = campaigns.reduce((s, c) => s + c.dailyBudget, 0);
+  const estMonthlyBudget = totalDailyBudget * 30.4;
+
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const monthStart = new Date(Date.UTC(year, month, 1));
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const daysElapsed = now.getUTCDate();
+  const daysRemainingInMonth = daysInMonth - daysElapsed;
+
+  const mtdSpend = history.filter((h) => h.date >= monthStart).reduce((s, h) => s + h.cost, 0);
+  const projectedMonthSpend = daysElapsed > 0 && mtdSpend > 0 ? (mtdSpend / daysElapsed) * daysInMonth : null;
+  const monthUtilization = projectedMonthSpend != null && estMonthlyBudget > 0 ? projectedMonthSpend / estMonthlyBudget : null;
+
+  // Trend: most recent 7 daily rows vs the 7 before them (handles gaps honestly).
+  const last7 = history.slice(0, 7).reduce((s, h) => s + h.cost, 0);
+  const prev7 = history.slice(7, 14).reduce((s, h) => s + h.cost, 0);
+  const spendTrend: BudgetSpendTrend | null = history.length >= 2
+    ? {
+        last7,
+        prev7,
+        changePct: prev7 > 0 ? (last7 - prev7) / prev7 : null,
+        direction: last7 > prev7 * 1.1 ? "up" : last7 < prev7 * 0.9 ? "down" : "flat",
+      }
+    : null;
+  const avgDailySpend7 = history.slice(0, 7).length > 0 ? last7 / Math.min(7, history.length) : 0;
+  const estDaysRemaining = avgDailySpend7 > 0 && estMonthlyBudget - mtdSpend > 0 ? (estMonthlyBudget - mtdSpend) / avgDailySpend7 : null;
+
+  const overspending = campaigns.filter((c) => c.budgetStatus === "overspending");
+  const underspending = campaigns.filter((c) => c.budgetStatus === "underspending");
+  const constrained = campaigns.filter((c) => c.budgetStatus === "constrained");
+
+  // Budget recommendations (dedicated) + alerts.
+  const recommendations: AdsRecommendation[] = [];
+  const alerts: AdsRecommendation[] = [];
+
+  const scaleOpps = constrained.filter((c) => c.opportunityScore >= 60).sort((a, b) => b.opportunityScore - a.opportunityScore);
+  const topOpp = scaleOpps[0];
+  if (topOpp) {
+    recommendations.push({ priority: "high", title: `${scaleOpps.length} budget-constrained campaign(s) worth scaling`, detail: `Top opportunity: "${topOpp.campaign}" (score ${topOpp.opportunityScore}) — converting while budget-limited.` });
+  }
+  if (underspending.length > 0) {
+    recommendations.push({ priority: "medium", title: `${underspending.length} campaign(s) under-spending`, detail: `Reallocate unused budget or tighten targeting: ${underspending.slice(0, 3).map((c) => c.campaign).join(", ")}.` });
+  }
+  if (overspending.length > 0) {
+    alerts.push({ priority: "high", title: `${overspending.length} campaign(s) over-delivering budget`, detail: `Averaging >110% of daily budget: ${overspending.slice(0, 3).map((c) => c.campaign).join(", ")}.` });
+  }
+  if (monthUtilization != null && monthUtilization > 1) {
+    alerts.push({ priority: "high", title: `Projected to exceed monthly budget (${(monthUtilization * 100).toFixed(0)}%)`, detail: `MTD spend ${mtdSpend.toFixed(0)} projects to ${projectedMonthSpend?.toFixed(0)} vs est. monthly budget ${estMonthlyBudget.toFixed(0)}.` });
+  }
+  if (spendTrend && spendTrend.changePct != null && spendTrend.changePct <= -0.4) {
+    alerts.push({ priority: "medium", title: `Spend dropped ${Math.abs(spendTrend.changePct * 100).toFixed(0)}% week-over-week`, detail: `Last 7d ${last7.toFixed(0)} vs prior 7d ${prev7.toFixed(0)} — check for paused campaigns or budget exhaustion.` });
+  }
+  if (history.length === 0) {
+    recommendations.push({ priority: "low", title: "No spend history yet", detail: "Monthly tracking and forecast populate once the daily Google Ads sync accumulates data." });
+  }
+
+  return {
+    status: "LIVE",
+    totalDailyBudget,
+    estMonthlyBudget,
+    mtdSpend,
+    projectedMonthSpend,
+    monthUtilization,
+    daysElapsed,
+    daysRemainingInMonth,
+    avgDailySpend7,
+    estDaysRemaining,
+    spendTrend,
+    historyDays: history.length,
+    campaigns,
+    overspending,
+    underspending,
+    recommendations,
+    alerts,
     generatedAt: new Date().toISOString(),
   };
 }
