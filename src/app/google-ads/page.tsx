@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getGoogleAdsOverview, getBudgetOptimization } from "@/server/services/google-ads.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
+import { RecommendationList } from "@/components/google-ads/RecommendationList";
 import { WaitingCard } from "@/components/gbp/WaitingCard";
 import { Card, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -86,19 +87,7 @@ export default async function GoogleAdsDashboard() {
             )}
 
             {(budget.alerts.length > 0 || budget.recommendations.length > 0) && (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {[...budget.alerts, ...budget.recommendations].map((r, i) => (
-                  <Card key={i}>
-                    <div className="flex items-start gap-3">
-                      <Pill tone={r.priority === "high" ? "crit" : r.priority === "medium" ? "warn" : "muted"}>{r.priority}</Pill>
-                      <div>
-                        <div className="text-sm font-medium text-text">{r.title}</div>
-                        <div className="text-xs text-muted">{r.detail}</div>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+              <RecommendationList items={[...budget.alerts, ...budget.recommendations]} />
             )}
 
             <Card>
@@ -157,19 +146,7 @@ export default async function GoogleAdsDashboard() {
         {ads.recommendations.length === 0 ? (
           <Card><p className="text-sm text-muted">All good — no issues detected from available signals.</p></Card>
         ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {ads.recommendations.map((r, i) => (
-              <Card key={i}>
-                <div className="flex items-start gap-3">
-                  <Pill tone={r.priority === "high" ? "crit" : r.priority === "medium" ? "warn" : "muted"}>{r.priority}</Pill>
-                  <div>
-                    <div className="text-sm font-medium text-text">{r.title}</div>
-                    <div className="text-xs text-muted">{r.detail}</div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <RecommendationList items={ads.recommendations} />
         )}
       </Section>
 

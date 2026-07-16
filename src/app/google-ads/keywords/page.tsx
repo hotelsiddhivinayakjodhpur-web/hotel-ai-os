@@ -1,5 +1,6 @@
 import { getKeywordIntelligence } from "@/server/services/google-ads.service";
 import { GoogleAdsNav } from "@/components/google-ads/GoogleAdsNav";
+import { RecommendationList } from "@/components/google-ads/RecommendationList";
 import { WaitingCard } from "@/components/gbp/WaitingCard";
 import { Card, PageHeader, Pill, Section, StatCard } from "@/components/ui/primitives";
 import { fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -46,19 +47,7 @@ export default async function GoogleAdsKeywordsPage() {
           {/* Recommendations + alerts */}
           {(ki.alerts.length > 0 || ki.recommendations.length > 0) && (
             <Section title="Keyword Recommendations & Alerts">
-              <div className="grid gap-3 lg:grid-cols-2">
-                {[...ki.alerts, ...ki.recommendations].map((r, i) => (
-                  <Card key={i}>
-                    <div className="flex items-start gap-3">
-                      <Pill tone={r.priority === "high" ? "crit" : r.priority === "medium" ? "warn" : "muted"}>{r.priority}</Pill>
-                      <div>
-                        <div className="text-sm font-medium text-text">{r.title}</div>
-                        <div className="text-xs text-muted">{r.detail}</div>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+              <RecommendationList items={[...ki.alerts, ...ki.recommendations]} />
             </Section>
           )}
 

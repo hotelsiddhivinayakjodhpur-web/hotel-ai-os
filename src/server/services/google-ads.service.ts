@@ -1,4 +1,5 @@
 import { cached, TTL } from "@/lib/cache";
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   adsConfigured,
@@ -9,6 +10,8 @@ import {
   type AdsDatePreset,
 } from "@/server/integrations/google-ads-client";
 import { listContent } from "./content.service";
+
+const log = logger.child({ component: "google-ads-service" });
 
 /**
  * Google Ads AI — data layer. READ-ONLY by design: never creates or edits
@@ -102,6 +105,7 @@ export interface AdsSearchTermRow {
 
 export interface AdsKeywordRow {
   keyword: string;
+  criterionKey: string; // stable unique id: `${adGroupId}~${criterionId}` — never keyword text
   campaign: string;
   matchType: string; // BROAD / PHRASE / EXACT
   status: string;
@@ -271,6 +275,27 @@ function impressionWeightedAvg<T extends { impressions: number }>(rows: T[], pic
   return den > 0 ? num / den : null;
 }
 
+/**
+ * Click-weighted average over rows that report a value (null if none do). Used
+ * for click-share aggregation: click share is a click-domain metric (your clicks
+ * ÷ eligible clicks), so per-keyword shares are weighted by each keyword's clicks
+ * rather than impressions. A true account roll-up would need per-keyword eligible-
+ * clicks denominators, which the Google Ads API does not expose — so click-weighting
+ * is the closest correct aggregation available.
+ */
+function clickWeightedAvg<T extends { clicks: number }>(rows: T[], pick: (r: T) => number | null): number | null {
+  let num = 0;
+  let den = 0;
+  for (const r of rows) {
+    const v = pick(r);
+    if (v != null && r.clicks > 0) {
+      num += v * r.clicks;
+      den += r.clicks;
+    }
+  }
+  return den > 0 ? num / den : null;
+}
+
 export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsCampaignsData> {
   // Base performance query — deliberately WITHOUT impression-share metrics, which
   // are invalid for Smart/Performance-Max campaigns and would fail the whole query.
@@ -365,8 +390,10 @@ async function getImpressionShare(preset: AdsDatePreset): Promise<Map<string, Ca
         lostIsRank: typeof r.metrics?.searchRankLostImpressionShare === "number" ? r.metrics.searchRankLostImpressionShare : null,
       });
     }
-  } catch {
-    // Impression share unavailable (e.g. Smart/PMax account) — degrade to empty.
+  } catch (e) {
+    // Impression share unavailable (e.g. Smart/PMax account) — degrade to empty,
+    // but record why internally (no user-facing exposure).
+    log.warn("impression_share_unavailable", { reason: e instanceof AdsApiError ? e.reason : e instanceof Error ? e.message : String(e) });
   }
   return map;
 }
@@ -414,18 +441,21 @@ function qsComponent(v: unknown): string | null {
  * place. keyword_view only returns standard Search keywords (Smart/PMax have
  * none), so the QS-component fields never trip the Smart/PMax incompatibility.
  */
-async function fetchKeywordRows(dateClause: string): Promise<AdsKeywordRow[]> {
+async function fetchKeywordRows(dateClause: string, extraWhere = ""): Promise<AdsKeywordRow[]> {
   const rows = (await adsSearch(
-    `SELECT campaign.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+    `SELECT campaign.name, ad_group.id, ad_group_criterion.criterion_id,
+            ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status,
             ad_group_criterion.quality_info.quality_score,
             ad_group_criterion.quality_info.creative_quality_score,
             ad_group_criterion.quality_info.post_click_quality_score,
             ad_group_criterion.quality_info.search_predicted_ctr,
             metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions, metrics.conversions_value
-     FROM keyword_view WHERE ${dateClause} ORDER BY metrics.clicks DESC LIMIT 50`,
+     FROM keyword_view WHERE ${dateClause}${extraWhere} ORDER BY metrics.clicks DESC LIMIT 50`,
   )) as {
     campaign?: { name?: string };
+    adGroup?: { id?: string };
     adGroupCriterion?: {
+      criterionId?: string;
       keyword?: { text?: string; matchType?: string };
       status?: string;
       qualityInfo?: { qualityScore?: number; creativeQualityScore?: string; postClickQualityScore?: string; searchPredictedCtr?: string };
@@ -443,6 +473,7 @@ async function fetchKeywordRows(dateClause: string): Promise<AdsKeywordRow[]> {
       const qi = r.adGroupCriterion?.qualityInfo;
       return {
         keyword: r.adGroupCriterion!.keyword!.text!,
+        criterionKey: `${r.adGroup?.id ?? "0"}~${r.adGroupCriterion?.criterionId ?? "0"}`,
         campaign: r.campaign?.name ?? "",
         matchType: r.adGroupCriterion?.keyword?.matchType ?? "",
         status: r.adGroupCriterion?.status ?? "",
@@ -684,7 +715,8 @@ async function readSpendHistory(): Promise<DailySpendRow[]> {
   try {
     const rows = await prisma.googleAdsDaily.findMany({ orderBy: { date: "desc" }, take: 40, select: { date: true, costMicros: true } });
     return rows.map((r) => ({ date: r.date, cost: Number(r.costMicros) / 1_000_000 }));
-  } catch {
+  } catch (e) {
+    log.warn("spend_history_read_failed", { reason: e instanceof Error ? e.message : String(e) });
     return [];
   }
 }
@@ -945,31 +977,41 @@ interface KeywordShareRow {
   lostIsRank: number | null;
 }
 
+// Bounded so the query stays scalable on very large accounts. Ordered by
+// impressions so the highest-visibility keywords (where share matters most) are
+// the ones covered; keeps this comfortably above the 50-row base keyword set.
+const KEYWORD_SHARE_LIMIT = 200;
+
 /**
  * Keyword-level impression + click share — isolated & best-effort. Only standard
  * Search keywords report these; Smart/PMax return INVALID_ARGUMENT. try/caught so
- * it can never break the intelligence build. Keyed by lowercased keyword text.
+ * it can never break the intelligence build. Keyed by the STABLE criterion id
+ * (`${adGroupId}~${criterionId}`) — never keyword text — so two keywords sharing
+ * a text can't overwrite each other.
  */
 async function getKeywordShareMetrics(preset: AdsDatePreset): Promise<Map<string, KeywordShareRow>> {
   const map = new Map<string, KeywordShareRow>();
   try {
     const rows = (await adsSearch(
-      `SELECT ad_group_criterion.keyword.text, metrics.search_impression_share, metrics.search_click_share,
+      `SELECT ad_group.id, ad_group_criterion.criterion_id,
+              metrics.search_impression_share, metrics.search_click_share,
               metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
-       FROM keyword_view WHERE ${duringClause(preset)}`,
-    )) as { adGroupCriterion?: { keyword?: { text?: string } }; metrics?: { searchImpressionShare?: number; searchClickShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
+       FROM keyword_view WHERE ${duringClause(preset)} ORDER BY metrics.impressions DESC LIMIT ${KEYWORD_SHARE_LIMIT}`,
+    )) as { adGroup?: { id?: string }; adGroupCriterion?: { criterionId?: string }; metrics?: { searchImpressionShare?: number; searchClickShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
     for (const r of rows) {
-      const text = r.adGroupCriterion?.keyword?.text;
-      if (!text) continue;
-      map.set(text.toLowerCase(), {
+      const criterionId = r.adGroupCriterion?.criterionId;
+      if (!criterionId) continue;
+      const key = `${r.adGroup?.id ?? "0"}~${criterionId}`;
+      map.set(key, {
         impressionShare: typeof r.metrics?.searchImpressionShare === "number" ? r.metrics.searchImpressionShare : null,
         clickShare: typeof r.metrics?.searchClickShare === "number" ? r.metrics.searchClickShare : null,
         lostIsBudget: typeof r.metrics?.searchBudgetLostImpressionShare === "number" ? r.metrics.searchBudgetLostImpressionShare : null,
         lostIsRank: typeof r.metrics?.searchRankLostImpressionShare === "number" ? r.metrics.searchRankLostImpressionShare : null,
       });
     }
-  } catch {
-    /* Smart/PMax or no Search keywords — share simply unavailable. */
+  } catch (e) {
+    // Smart/PMax or no Search keywords — share simply unavailable; record why.
+    log.warn("keyword_share_unavailable", { reason: e instanceof AdsApiError ? e.reason : e instanceof Error ? e.message : String(e) });
   }
   return map;
 }
@@ -1055,18 +1097,12 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
   if (!adsConfigured()) return { ...empty, reason: "Google Ads API not connected (set GOOGLE_ADS_* env vars)." };
 
   const priorClause = priorWindowClause(preset);
-  const [kwRes, termsRes, shareRes, priorRes] = await Promise.allSettled([
-    getKeywords(preset),
-    getSearchTerms(preset),
-    getKeywordShareMetrics(preset),
-    priorClause ? fetchKeywordRows(priorClause) : Promise.resolve<AdsKeywordRow[]>([]),
-  ]);
+  const [kwRes, termsRes, shareRes] = await Promise.allSettled([getKeywords(preset), getSearchTerms(preset), getKeywordShareMetrics(preset)]);
 
   if (kwRes.status === "rejected") return { ...empty, status: "WAITING", reason: failReason(kwRes.reason) };
   const keywords = kwRes.value;
   const searchTerms = termsRes.status === "fulfilled" ? termsRes.value : [];
   const shareMap = shareRes.status === "fulfilled" ? shareRes.value : new Map<string, KeywordShareRow>();
-  const priorRows = priorRes.status === "fulfilled" ? priorRes.value : [];
 
   if (keywords.length === 0 && searchTerms.length === 0) {
     return {
@@ -1076,21 +1112,38 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
     };
   }
 
+  // Trend: fetch the prior equal-length window SCOPED to exactly the current
+  // keywords' criterion ids. This removes the "top-50 both windows" artifact —
+  // absence of a prior row now means the criterion truly had no activity then
+  // (genuinely new/dormant), not merely that it ranked below the cut.
+  let priorRows: AdsKeywordRow[] = [];
+  if (priorClause && keywords.length > 0) {
+    const critIds = [...new Set(keywords.map((k) => k.criterionKey.split("~")[1]).filter((id) => id && id !== "0"))];
+    if (critIds.length > 0) {
+      try {
+        priorRows = await fetchKeywordRows(priorClause, ` AND ad_group_criterion.criterion_id IN (${critIds.join(", ")})`);
+      } catch (e) {
+        log.warn("keyword_trend_prior_failed", { reason: e instanceof AdsApiError ? e.reason : e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+  const trendAvailable = priorClause !== null;
+
   // Account CPA benchmark (from keyword sums) for relative scoring.
   const totalCost = keywords.reduce((s, k) => s + k.cost, 0);
   const totalConv = keywords.reduce((s, k) => s + k.conversions, 0);
   const accountCpa = totalConv > 0 ? totalCost / totalConv : null;
 
-  // Prior-window click index for trend.
+  // Prior-window click index for trend, keyed by the stable criterion id.
   const priorClicks = new Map<string, number>();
-  for (const k of priorRows) priorClicks.set(k.keyword.toLowerCase(), (priorClicks.get(k.keyword.toLowerCase()) ?? 0) + k.clicks);
+  for (const k of priorRows) priorClicks.set(k.criterionKey, (priorClicks.get(k.criterionKey) ?? 0) + k.clicks);
 
   const enriched: KeywordRowExt[] = keywords.map((k) => {
     const { score, perf, issues } = scoreKeyword(k, accountCpa);
-    const share = shareMap.get(k.keyword.toLowerCase());
+    const share = shareMap.get(k.criterionKey);
     let trend: KeywordRowExt["trend"] = null;
-    if (priorClause) {
-      const prev = priorClicks.get(k.keyword.toLowerCase());
+    if (trendAvailable) {
+      const prev = priorClicks.get(k.criterionKey);
       if (prev === undefined) trend = k.clicks > 0 ? "new" : null;
       else if (k.clicks > prev * 1.2) trend = "rising";
       else if (k.clicks < prev * 0.8) trend = "falling";
@@ -1172,18 +1225,20 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
 
   const qualityScore = summariseQualityScore(keywords);
 
-  // Impression / click share summary (impression-weighted where possible).
+  // Share summary: impression share weighted by impressions; click share weighted
+  // by clicks (click-domain metric); lost-IS weighted by impressions. Keyed by the
+  // stable criterion id so duplicate keyword texts don't collide.
   const shareRows = enriched.filter((k) => k.impressionShare != null || k.clickShare != null);
   const share: KeywordShareSummary = {
     available: shareRows.length > 0,
     avgImpressionShare: impressionWeightedAvg(enriched, (k) => k.impressionShare),
-    avgClickShare: impressionWeightedAvg(enriched, (k) => k.clickShare),
+    avgClickShare: clickWeightedAvg(enriched, (k) => k.clickShare),
     lostIsBudget: impressionWeightedAvg(
-      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.keyword.toLowerCase())?.lostIsBudget ?? null })),
+      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.criterionKey)?.lostIsBudget ?? null })),
       (r) => r.v,
     ),
     lostIsRank: impressionWeightedAvg(
-      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.keyword.toLowerCase())?.lostIsRank ?? null })),
+      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.criterionKey)?.lostIsRank ?? null })),
       (r) => r.v,
     ),
   };
@@ -1205,11 +1260,11 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
   // Trend summary.
   const movers = enriched
     .filter((k) => k.trend === "rising" || k.trend === "falling")
-    .map((k) => ({ keyword: k.keyword, trend: k.trend as string, clicks: k.clicks, priorClicks: priorClicks.get(k.keyword.toLowerCase()) ?? 0 }))
+    .map((k) => ({ keyword: k.keyword, trend: k.trend as string, clicks: k.clicks, priorClicks: priorClicks.get(k.criterionKey) ?? 0 }))
     .sort((a, b) => Math.abs(b.clicks - b.priorClicks) - Math.abs(a.clicks - a.priorClicks))
     .slice(0, 8);
   const trend: KeywordTrendSummary = {
-    available: priorClause !== null,
+    available: trendAvailable,
     rising: enriched.filter((k) => k.trend === "rising").length,
     falling: enriched.filter((k) => k.trend === "falling").length,
     newKeywords: enriched.filter((k) => k.trend === "new").length,
