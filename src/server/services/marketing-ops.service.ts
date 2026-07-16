@@ -1,6 +1,6 @@
 import { cached, TTL } from "@/lib/cache";
 import { getCommandCenter } from "./command-center.service";
-import { getGoogleAdsOverview, getSearchTerms, getKeywords } from "./google-ads.service";
+import { getGoogleAdsOverview } from "./google-ads.service";
 import { getMetaAdsOverview } from "./meta-ads.service";
 import { getFacebookOverview } from "./facebook.service";
 import { getInstagramOverview } from "./instagram.service";
@@ -391,7 +391,3 @@ async function buildOps(): Promise<MarketingOps> {
     topSearchTerms,
   };
 }
-
-
-// Re-export the reusable reads the actions/page need (avoids duplicate imports there).
-export { getSearchTerms, getKeywords };

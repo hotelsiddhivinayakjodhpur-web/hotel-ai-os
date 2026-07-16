@@ -53,7 +53,12 @@ export default async function GoogleAdsDashboard() {
         {budget.status === "LIVE" ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <StatCard label="Total Daily Budget" value={fmtMoney(budget.totalDailyBudget)} hint={`≈ ${fmtMoney(budget.estMonthlyBudget)}/mo`} />
+              <StatCard
+                label="Active Daily Budget"
+                value={fmtMoney(budget.totalDailyBudget)}
+                tone={budget.activeCampaigns === 0 ? "warn" : "default"}
+                hint={budget.activeCampaigns === 0 ? "no ENABLED campaigns" : `${budget.activeCampaigns} active campaign(s) · ≈ ${fmtMoney(budget.estMonthlyBudget)}/mo`}
+              />
               <StatCard
                 label="Month-to-date Spend"
                 value={fmtMoney(budget.mtdSpend)}

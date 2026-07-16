@@ -124,25 +124,8 @@ export interface AdsKeywordRow {
   expectedCtr: string | null; // search_predicted_ctr
 }
 
-export interface AdsAdGroupRow {
-  adGroup: string;
-  campaign: string;
-  status: string;
-}
-
-export interface AdsAssetRow {
-  id: string;
-  type: string;
-}
-
 export interface AdsApiRecommendationRow {
   type: string;
-}
-
-export interface AdsConversionActionRow {
-  name: string;
-  status: string;
-  category: string;
 }
 
 export interface AdsQueueStats {
@@ -296,7 +279,16 @@ function clickWeightedAvg<T extends { clicks: number }>(rows: T[], pick: (r: T) 
   return den > 0 ? num / den : null;
 }
 
+/**
+ * Campaign performance for a window. Cached under a dedicated key so the several
+ * keyed parents that need it (overview, campaign intelligence, budget) collapse
+ * to ONE API call per preset instead of one each.
+ */
 export async function getCampaigns(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsCampaignsData> {
+  return cached(`google-ads:campaigns:${preset}`, TTL.medium, () => fetchCampaigns(preset));
+}
+
+async function fetchCampaigns(preset: AdsDatePreset): Promise<AdsCampaignsData> {
   // Base performance query — deliberately WITHOUT impression-share metrics, which
   // are invalid for Smart/Performance-Max campaigns and would fail the whole query.
   // Impression share is fetched separately (getImpressionShare) and merged in the
@@ -419,17 +411,6 @@ export async function getDailySeries(preset: AdsDatePreset = "LAST_30_DAYS"): Pr
     }));
 }
 
-export async function getPerformanceTotals(preset: AdsDatePreset): Promise<AdsTotals> {
-  return (await getCampaigns(preset)).totals;
-}
-
-export async function getAdGroups(): Promise<AdsAdGroupRow[]> {
-  const rows = (await adsSearch(
-    "SELECT ad_group.name, ad_group.status, campaign.name FROM ad_group ORDER BY campaign.name LIMIT 50",
-  )) as { adGroup?: { name?: string; status?: string }; campaign?: { name?: string } }[];
-  return rows.map((r) => ({ adGroup: r.adGroup?.name ?? "", campaign: r.campaign?.name ?? "", status: r.adGroup?.status ?? "" }));
-}
-
 /** Quality-Score component enum → display string, or null when Google has no signal. */
 function qsComponent(v: unknown): string | null {
   return typeof v === "string" && v !== "UNKNOWN" && v !== "UNSPECIFIED" ? v : null;
@@ -498,7 +479,13 @@ export async function getKeywords(preset: AdsDatePreset = "LAST_30_DAYS"): Promi
   return fetchKeywordRows(duringClause(preset));
 }
 
+/** Search terms for a window. Cached under a dedicated key so multiple keyed
+ *  parents (overview, keyword intelligence) share ONE API call per preset. */
 export async function getSearchTerms(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsSearchTermRow[]> {
+  return cached(`google-ads:search-terms:${preset}`, TTL.medium, () => fetchSearchTerms(preset));
+}
+
+async function fetchSearchTerms(preset: AdsDatePreset): Promise<AdsSearchTermRow[]> {
   const rows = (await adsSearch(
     `SELECT search_term_view.search_term, search_term_view.status, campaign.name,
             metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions
@@ -517,23 +504,46 @@ export async function getSearchTerms(preset: AdsDatePreset = "LAST_30_DAYS"): Pr
     }));
 }
 
-export async function getAssets(): Promise<AdsAssetRow[]> {
-  const rows = (await adsSearch("SELECT asset.id, asset.type FROM asset LIMIT 50")) as { asset?: { id?: string; type?: string } }[];
-  return rows.filter((r) => r.asset?.id).map((r) => ({ id: String(r.asset!.id), type: r.asset?.type ?? "" }));
+/**
+ * The account's TRUE active daily budget configuration (Department 2).
+ *
+ * Deliberately NOT date-filtered and NOT derived from the metrics query:
+ *  - `campaign_budget.amount_micros` is current configuration, not a metric, so a
+ *    `segments.date` window is wrong for it (a live campaign with no impressions
+ *    in the window would be invisible, and REMOVED/PAUSED campaigns that DID have
+ *    impressions would be counted).
+ *  - Only ENABLED campaigns can spend, so only they contribute an active budget.
+ *  - A shared budget is reported on EVERY campaign that uses it, so the caller
+ *    must sum DISTINCT budget ids — never per-campaign amounts.
+ */
+export interface ActiveBudgetRow {
+  campaign: string;
+  budgetId: string;
+  budgetName: string;
+  amount: number; // daily budget in currency units
+  explicitlyShared: boolean;
+}
+
+async function getActiveBudgets(): Promise<ActiveBudgetRow[]> {
+  const rows = (await adsSearch(
+    `SELECT campaign.name, campaign_budget.id, campaign_budget.name,
+            campaign_budget.amount_micros, campaign_budget.explicitly_shared
+     FROM campaign WHERE campaign.status = 'ENABLED'`,
+  )) as { campaign?: { name?: string }; campaignBudget?: { id?: string; name?: string; amountMicros?: string; explicitlyShared?: boolean } }[];
+  return rows
+    .filter((r) => r.campaignBudget?.id)
+    .map((r) => ({
+      campaign: r.campaign?.name ?? "",
+      budgetId: String(r.campaignBudget!.id),
+      budgetName: r.campaignBudget?.name ?? "",
+      amount: fromMicros(r.campaignBudget?.amountMicros),
+      explicitlyShared: Boolean(r.campaignBudget?.explicitlyShared),
+    }));
 }
 
 export async function getApiRecommendations(): Promise<AdsApiRecommendationRow[]> {
   const rows = (await adsSearch("SELECT recommendation.type FROM recommendation LIMIT 25")) as { recommendation?: { type?: string } }[];
   return rows.filter((r) => r.recommendation?.type).map((r) => ({ type: r.recommendation!.type! }));
-}
-
-export async function getConversionActions(): Promise<AdsConversionActionRow[]> {
-  const rows = (await adsSearch(
-    "SELECT conversion_action.name, conversion_action.status, conversion_action.category FROM conversion_action LIMIT 25",
-  )) as { conversionAction?: { name?: string; status?: string; category?: string } }[];
-  return rows
-    .filter((r) => r.conversionAction?.name)
-    .map((r) => ({ name: r.conversionAction!.name!, status: r.conversionAction?.status ?? "", category: r.conversionAction?.category ?? "" }));
 }
 
 // ── Campaign Intelligence (Department 1) ────────────────────────────────────
@@ -686,7 +696,10 @@ export interface BudgetSpendTrend {
 export interface BudgetOptimization {
   status: AdsSectionStatus;
   reason?: string;
-  totalDailyBudget: number;
+  totalDailyBudget: number; // sum of DISTINCT budgets across ENABLED campaigns only
+  activeCampaigns: number; // ENABLED campaigns contributing to the budget
+  distinctBudgets: number; // distinct campaign_budget ids (shared counted once)
+  sharedBudgets: number; // how many of those are explicitly shared
   estMonthlyBudget: number; // daily × 30.4
   mtdSpend: number; // month-to-date, from GoogleAdsDaily
   projectedMonthSpend: number | null;
@@ -729,6 +742,9 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
   const empty: BudgetOptimization = {
     status: "NOT_CONFIGURED",
     totalDailyBudget: 0,
+    activeCampaigns: 0,
+    distinctBudgets: 0,
+    sharedBudgets: 0,
     estMonthlyBudget: 0,
     mtdSpend: 0,
     projectedMonthSpend: null,
@@ -748,15 +764,28 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
   };
   if (!adsConfigured()) return { ...empty, reason: "Google Ads API not connected (set GOOGLE_ADS_* env vars)." };
 
-  const [campRes, history] = await Promise.all([getCampaigns(preset).catch((e) => e as Error), readSpendHistory()]);
+  const [campRes, history, budgetRes] = await Promise.all([
+    getCampaigns(preset).catch((e) => e as Error),
+    readSpendHistory(),
+    getActiveBudgets().catch((e) => e as Error),
+  ]);
   if (campRes instanceof Error) return { ...empty, status: "WAITING", reason: failReason(campRes) };
+  if (budgetRes instanceof Error) return { ...empty, status: "WAITING", reason: failReason(budgetRes) };
   const { rows } = campRes;
-  if (rows.length === 0) return { ...empty, status: "WAITING", reason: "No campaign data returned yet (account may have no active campaigns)." };
+  const activeBudgets = budgetRes;
+
+  if (rows.length === 0 && activeBudgets.length === 0) {
+    return { ...empty, status: "WAITING", reason: "No campaign data returned yet (account may have no active campaigns)." };
+  }
 
   const days = presetDays(preset);
 
-  // Per-campaign budget analysis.
-  const campaigns: BudgetCampaignRow[] = rows.map((r) => {
+  // Per-campaign budget analysis. Only campaigns that can actually spend are
+  // meaningful here, so REMOVED campaigns are excluded (they still appear in the
+  // date-windowed metrics query because they had impressions before removal).
+  const campaigns: BudgetCampaignRow[] = rows
+    .filter((r) => r.status !== "REMOVED")
+    .map((r) => {
     const avgDailySpend = r.cost / days;
     const util = r.budgetUtilization;
     let budgetStatus: BudgetStatus;
@@ -793,9 +822,19 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
     };
   });
 
-  // Account-level budget + forecast (uses real daily spend history).
-  const totalDailyBudget = campaigns.reduce((s, c) => s + c.dailyBudget, 0);
+  // Account-level budget = the TRUE active daily budget.
+  //
+  // Sum DISTINCT campaign_budget ids across ENABLED campaigns only:
+  //  - summing per-campaign amounts would count a SHARED budget once per campaign
+  //    that uses it (Google reports the same budget on every such campaign);
+  //  - PAUSED/REMOVED campaigns cannot spend, so their budgets are not active
+  //    (the old code summed the metrics query, which includes removed campaigns
+  //    that merely had impressions inside the window).
+  const budgetById = new Map<string, number>();
+  for (const b of activeBudgets) budgetById.set(b.budgetId, b.amount);
+  const totalDailyBudget = [...budgetById.values()].reduce((s, v) => s + v, 0);
   const estMonthlyBudget = totalDailyBudget * 30.4;
+  const sharedBudgetCount = new Set(activeBudgets.filter((b) => b.explicitlyShared).map((b) => b.budgetId)).size;
 
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -854,10 +893,27 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
   if (history.length === 0) {
     recommendations.push({ priority: "low", title: "No spend history yet", detail: "Monthly tracking and forecast populate once the daily Google Ads sync accumulates data." });
   }
+  if (activeBudgets.length === 0) {
+    alerts.push({
+      priority: "high",
+      title: "No ENABLED campaigns — active daily budget is ₹0",
+      detail: `Every campaign in this account is paused or removed, so nothing can spend. Budgets shown per campaign below belong to non-active campaigns and are excluded from the total.`,
+    });
+  }
+  if (sharedBudgetCount > 0) {
+    recommendations.push({
+      priority: "low",
+      title: `${sharedBudgetCount} shared budget(s) in use`,
+      detail: "Shared budgets are counted once in the total (Google reports them on every campaign that uses them).",
+    });
+  }
 
   return {
     status: "LIVE",
     totalDailyBudget,
+    activeCampaigns: new Set(activeBudgets.map((b) => b.campaign)).size,
+    distinctBudgets: budgetById.size,
+    sharedBudgets: sharedBudgetCount,
     estMonthlyBudget,
     mtdSpend,
     projectedMonthSpend,
