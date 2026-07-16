@@ -1,4 +1,4 @@
-import { HOTEL } from "./hotel-facts";
+import { HOTEL, ATTRACTIONS } from "./hotel-facts";
 
 /**
  * Google Ads AI — deterministic planning tools and ADAPTERS, not generators.
@@ -29,7 +29,212 @@ function clamp(s: string, max: number): string {
   return cut.slice(0, Math.max(10, cut.lastIndexOf(" "))).trim();
 }
 
+// ── Ad Copy AI (Department 4) ────────────────────────────────────────────────
+// Deterministic RSA / extension generators built ONLY from verified hotel facts
+// (hotel-facts.ts) plus, optionally, an existing Content AI draft. Prices, dates
+// and discounts are NEVER invented — anything unverified becomes an [OPERATOR: …]
+// placeholder. Read-only: nothing is pushed to Google Ads.
+
+// Real Google Ads asset character limits.
+export const AD_LIMITS = { headline: 30, description: 90, path: 15, callout: 25, snippetValue: 25 } as const;
+
+export type AdCopyTheme = "generic" | "hotel-offer" | "festival" | "weekend" | "family-room" | "business-travel";
+
+export const AD_COPY_THEMES: { id: AdCopyTheme; label: string }[] = [
+  { id: "generic", label: "General / brand" },
+  { id: "hotel-offer", label: "Hotel Offers" },
+  { id: "festival", label: "Festival Ads" },
+  { id: "weekend", label: "Weekend Offers" },
+  { id: "family-room", label: "Family Room Offers" },
+  { id: "business-travel", label: "Business Travel Ads" },
+];
+
+export interface StructuredSnippet {
+  header: string;
+  values: string[]; // ≤25 chars each
+}
+
+export interface PromotionInput {
+  occasion?: string;
+  discountType?: "percent" | "amount";
+  discountValue?: string; // operator-supplied; never invented
+  promoCode?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface AdStrength {
+  score: number; // 0-100 — local heuristic, NOT Google's official Ad Strength
+  rating: "excellent" | "good" | "average" | "poor";
+  tips: string[];
+}
+
+export interface AdCopyPack {
+  theme: AdCopyTheme;
+  label: string;
+  headlines: string[]; // ≤30
+  descriptions: string[]; // ≤90
+  callouts: string[]; // ≤25
+  paths: string[]; // display path fields ≤15
+  structuredSnippet: StructuredSnippet;
+  promotion: string[] | null; // rendered promotion-extension lines (operator-driven)
+  strength: AdStrength;
+  notes: string[];
+}
+
+export interface AdCopyInput {
+  theme: AdCopyTheme;
+  source?: AdsSource | null;
+  promo?: PromotionInput;
+}
+
+// Per-theme seed phrases. Every phrase is either a verified fact (location,
+// hospitality, book-direct) or an [OPERATOR: …] placeholder — never an unverified
+// amenity, price or rating.
+const THEME_SEEDS: Record<AdCopyTheme, { headlines: string[]; descriptions: string[]; callouts: string[]; path2: string }> = {
+  generic: {
+    headlines: ["Book Direct & Save", `Comfortable ${HOTEL.city} Stay`, `Near ${HOTEL.city} Attractions`, "Warm Rajasthani Welcome"],
+    descriptions: [`Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`],
+    callouts: ["Book Direct for Best Rate", "Warm Rajasthani Hospitality", "Heart of the Blue City"],
+    path2: "direct",
+  },
+  "hotel-offer": {
+    headlines: ["Special Hotel Offer", "Best Direct Rate", "Save Booking Direct", "Limited-Time Room Deal"],
+    descriptions: [`Book ${HOTEL.name} direct for our best available rate — no OTA fees. [OPERATOR: add your offer].`],
+    callouts: ["Best Direct Rate", "No Booking Fees", "[OPERATOR: e.g. Free Cancellation]"],
+    path2: "offers",
+  },
+  festival: {
+    headlines: [`Festival Stay in ${HOTEL.city}`, "Celebrate in the Blue City", "Festive Season Rooms", "[OPERATOR: festival] Getaway"],
+    descriptions: [`Spend [OPERATOR: festival] at ${HOTEL.name} in ${HOTEL.city}. Book direct for the best rate.`],
+    callouts: ["Festive Season Stay", "Book Direct & Save", "[OPERATOR: festival dates]"],
+    path2: "festival",
+  },
+  weekend: {
+    headlines: [`Weekend Getaway ${HOTEL.city}`, "Plan Your Weekend", "Short Break in Jodhpur", "Weekend Rooms Available"],
+    descriptions: [`Plan a weekend at ${HOTEL.name} — explore the Blue City, book direct for the best rate.`],
+    callouts: ["Weekend Getaway", "Book Direct & Save", "Explore the Blue City"],
+    path2: "weekend",
+  },
+  "family-room": {
+    headlines: [`Family Rooms in ${HOTEL.city}`, "Family Stay Jodhpur", "Room for the Family", "Family Trip to Jodhpur"],
+    descriptions: [`Family-friendly rooms at ${HOTEL.name}, close to ${HOTEL.city}'s top sights. Book direct.`],
+    callouts: ["Family-Friendly Stay", "Near Top Attractions", "[OPERATOR: family room details]"],
+    path2: "family",
+  },
+  "business-travel": {
+    headlines: [`Business Stay ${HOTEL.city}`, "Corporate Stay Jodhpur", "Work Trip to Jodhpur", "Convenient Jodhpur Base"],
+    descriptions: [`A convenient ${HOTEL.city} base for work travel at ${HOTEL.name}. Book direct for the best rate.`],
+    callouts: ["Convenient Location", "Book Direct & Save", "[OPERATOR: e.g. Fast Wi-Fi]"],
+    path2: "business",
+  },
+};
+
+const BASE_HEADLINES = [HOTEL.name, `Hotel in ${HOTEL.city}`, `Stay in ${HOTEL.city}`, "Near Mehrangarh Fort"];
+const BASE_DESCRIPTION = `${HOTEL.name} in ${HOTEL.city} — comfortable rooms, warm hospitality. Book direct for the best rate.`;
+
+function dedupClamp(candidates: string[], max: number, minLen: number, take: number): string[] {
+  return [...new Set(candidates.map((c) => clamp(c, max)).filter((c) => c.length >= minLen && c.length <= max))].slice(0, take);
+}
+
+/** Full RSA asset pack for a theme, optionally enriched by a Content AI draft. */
+export function buildAdCopyPack(input: AdCopyInput): AdCopyPack {
+  const theme = input.theme;
+  const seed = THEME_SEEDS[theme];
+  const label = AD_COPY_THEMES.find((t) => t.id === theme)?.label ?? "Ad copy";
+  const sourceLines = input.source ? meaningfulLines(input.source.body, 4) : [];
+  const sourceTitle = input.source ? clamp(input.source.title.replace(/^[A-Za-z ]+—\s*/, ""), AD_LIMITS.headline) : "";
+
+  const headlines = dedupClamp(
+    [...(sourceTitle ? [sourceTitle] : []), ...seed.headlines, ...BASE_HEADLINES, ...sourceLines],
+    AD_LIMITS.headline,
+    5,
+    15,
+  );
+  const descriptions = dedupClamp(
+    [...seed.descriptions, BASE_DESCRIPTION, ...sourceLines],
+    AD_LIMITS.description,
+    25,
+    4,
+  );
+  const callouts = dedupClamp(seed.callouts, AD_LIMITS.callout, 3, 6);
+
+  const structuredSnippet: StructuredSnippet = {
+    header: "Neighborhoods",
+    values: dedupClamp([...ATTRACTIONS], AD_LIMITS.snippetValue, 3, 10),
+  };
+
+  const paths = [clamp("book", AD_LIMITS.path), clamp(seed.path2, AD_LIMITS.path)];
+  const promotion = renderPromotion(input.promo);
+  const strength = scoreAdStrength({ headlines, descriptions, callouts, structuredSnippet });
+
+  return {
+    theme,
+    label,
+    headlines,
+    descriptions,
+    callouts,
+    paths,
+    structuredSnippet,
+    promotion,
+    strength,
+    notes: [
+      `Final URL: ${HOTEL.website}${theme === "family-room" ? "/rooms" : ""} (match the landing page to the ad group).`,
+      `Google limits (pre-clamped): headline ≤${AD_LIMITS.headline}, description ≤${AD_LIMITS.description}, callout ≤${AD_LIMITS.callout}, path ≤${AD_LIMITS.path}.`,
+      "Ad Strength here is a local checklist estimate — Google's official Ad Strength shows in the Ads editor once assets are entered.",
+      "[OPERATOR: verify every claim before publishing; no prices, discounts, dates or ratings unless confirmed today.]",
+    ],
+  };
+}
+
+/** Promotion extension lines from operator input (never invents a discount). */
+export function renderPromotion(p?: PromotionInput): string[] | null {
+  if (!p || (!p.occasion && !p.discountValue && !p.promoCode)) return null;
+  const discount = p.discountValue?.trim()
+    ? p.discountType === "amount"
+      ? `₹${p.discountValue.trim()} off`
+      : `${p.discountValue.trim()}% off`
+    : "[OPERATOR: set the discount]";
+  return [
+    `Occasion: ${p.occasion?.trim() || "[OPERATOR: occasion, e.g. Diwali / None]"}`,
+    `Promotion: ${discount}`,
+    `Promo code: ${p.promoCode?.trim() || "[OPERATOR: code, optional]"}`,
+    `Runs: ${p.startDate?.trim() || "[OPERATOR: start]"} → ${p.endDate?.trim() || "[OPERATOR: end]"}`,
+    "Enter as a Promotion extension in Google Ads. Discount/dates must be real and honoured.",
+  ];
+}
+
+/** Local, deterministic ad-strength estimate (NOT Google's official metric). */
+export function scoreAdStrength(pack: { headlines: string[]; descriptions: string[]; callouts: string[]; structuredSnippet: StructuredSnippet }): AdStrength {
+  let score = 0;
+  const tips: string[] = [];
+  if (pack.headlines.length >= 12) score += 35;
+  else if (pack.headlines.length >= 8) score += 25;
+  else {
+    score += 12;
+    tips.push(`Add more headlines (${pack.headlines.length}/15) — Google rewards 12–15 distinct headlines.`);
+  }
+  if (pack.descriptions.length >= 4) score += 25;
+  else {
+    score += 12;
+    tips.push(`Add descriptions (${pack.descriptions.length}/4).`);
+  }
+  if (pack.callouts.length >= 4) score += 15;
+  else tips.push("Add at least 4 callout extensions.");
+  if (pack.structuredSnippet.values.length >= 3) score += 10;
+  const hasLocation = pack.headlines.some((h) => h.toLowerCase().includes(HOTEL.city.toLowerCase()));
+  if (hasLocation) score += 15;
+  else tips.push(`Include "${HOTEL.city}" in at least one headline for local relevance.`);
+
+  score = Math.max(0, Math.min(100, score));
+  const rating: AdStrength["rating"] = score >= 85 ? "excellent" : score >= 70 ? "good" : score >= 50 ? "average" : "poor";
+  return { score, rating, tips };
+}
+
 // ── Ad Copy (Responsive Search Ad assets adapted from a Content AI draft) ────
+// Thin wrapper kept for the Planner's quick "Ad Copy" tool — delegates to the
+// shared generic pack so there is ONE source of truth for headline/description
+// generation (no duplicated logic).
 export interface AdCopyAssets {
   headlines: string[]; // ≤30 chars each
   descriptions: string[]; // ≤90 chars each
@@ -37,32 +242,10 @@ export interface AdCopyAssets {
 }
 
 export function adaptToAdCopy(source: AdsSource): AdCopyAssets {
-  const lines = meaningfulLines(source.body, 4);
-  const topic = clamp(source.title.replace(/^[A-Za-z ]+—\s*/, ""), 30);
-
-  const headlineCandidates = [
-    topic,
-    `${HOTEL.name}`,
-    `Hotel in ${HOTEL.city}`,
-    `Stay in ${HOTEL.city}`,
-    `Book Direct & Save`,
-    `Comfortable ${HOTEL.city} Stay`,
-    `Near ${HOTEL.city} Attractions`,
-    `Warm Rajasthani Hospitality`,
-    ...lines.map((l) => clamp(l, 30)),
-  ];
-  const headlines = [...new Set(headlineCandidates.filter((h) => h.length >= 5 && h.length <= 30))].slice(0, 12);
-
-  const descriptionCandidates = [
-    clamp(`${HOTEL.name} in ${HOTEL.city} — comfortable rooms, warm hospitality. Book direct for the best rate.`, 90),
-    ...lines.map((l) => clamp(l, 90)),
-    clamp(`Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`, 90),
-  ];
-  const descriptions = [...new Set(descriptionCandidates.filter((d) => d.length >= 25 && d.length <= 90))].slice(0, 4);
-
+  const pack = buildAdCopyPack({ theme: "generic", source });
   return {
-    headlines,
-    descriptions,
+    headlines: pack.headlines,
+    descriptions: pack.descriptions,
     notes: [
       `Final URL: ${HOTEL.website} (or a deeper page that matches the ad group)`,
       "Google RSA limits: 15 headlines ≤30 chars, 4 descriptions ≤90 chars — assets above are pre-clamped.",

@@ -10,6 +10,7 @@ import {
   type CampaignPlanInput,
 } from "@/lib/google-ads-tools";
 import type { ContentItemView } from "@/server/services/content.service";
+import { inputCls, btnCls, chipCls } from "./adsForm";
 
 /**
  * Google Ads Planner — deterministic planning tools. Ad copy ADAPTS existing
@@ -18,13 +19,6 @@ import type { ContentItemView } from "@/server/services/content.service";
  * in Google Ads.
  */
 type Tool = "plan" | "copy" | "keywords" | "budget" | "landing";
-
-const inputCls =
-  "w-full rounded-lg border border-border bg-bg/60 px-3 py-2 text-sm text-text placeholder:text-muted focus:border-brand focus:outline-none";
-const btnCls =
-  "rounded-lg border border-brand/40 bg-brand/10 px-4 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand/20 disabled:opacity-40";
-const chipCls = (active: boolean) =>
-  `rounded-lg border px-2.5 py-1 text-xs ${active ? "border-brand bg-brand/15 text-text" : "border-border text-muted hover:text-text"}`;
 
 const TOOL_LABELS: Record<Tool, string> = {
   plan: "Campaign Planner",

@@ -7,6 +7,7 @@ const TABS = [
   { href: "/google-ads", label: "Dashboard" },
   { href: "/google-ads/campaigns", label: "Campaigns" },
   { href: "/google-ads/keywords", label: "Keywords" },
+  { href: "/google-ads/ad-copy", label: "Ad Copy" },
   { href: "/google-ads/planner", label: "Planner" },
   { href: "/google-ads/calendar", label: "Campaign Calendar" },
   { href: "/google-ads/queue", label: "Approval Queue" },
