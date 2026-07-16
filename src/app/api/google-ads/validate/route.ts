@@ -117,6 +117,28 @@ export async function GET(req: NextRequest) {
     return `${rows.length} daily row(s) (7d)`;
   });
 
+  // Keyword Intelligence (Department 3) — search-term status/conversions + isolated keyword share.
+  const searchTermStatus = await probe(async () => {
+    const rows = (await adsSearch(
+      "SELECT search_term_view.search_term, search_term_view.status, campaign.name, metrics.clicks, metrics.conversions FROM search_term_view WHERE segments.date DURING LAST_30_DAYS ORDER BY metrics.clicks DESC LIMIT 25",
+    )) as { searchTermView?: { status?: string }; metrics?: { conversions?: number } }[];
+    const added = rows.filter((r) => r.searchTermView?.status === "ADDED").length;
+    const conv = rows.filter((r) => Number(r.metrics?.conversions ?? 0) > 0).length;
+    return `${rows.length} search term(s) · ${added} already added · ${conv} converting`;
+  });
+
+  const keywordShare = await probe(async () => {
+    // Isolated keyword-level share (Smart/PMax return INVALID_ARGUMENT — mirrors the service).
+    const rows = (await adsSearch(
+      "SELECT ad_group_criterion.keyword.text, metrics.search_impression_share, metrics.search_click_share FROM keyword_view WHERE segments.date DURING LAST_30_DAYS",
+    )) as { metrics?: { searchImpressionShare?: number; searchClickShare?: number } }[];
+    const withIs = rows.filter((r) => typeof r.metrics?.searchImpressionShare === "number");
+    const withClick = rows.filter((r) => typeof r.metrics?.searchClickShare === "number");
+    return rows.length === 0
+      ? "0 keyword rows report share (Smart/PMax or no Search keywords)"
+      : `${withIs.length} keyword(s) report IS · ${withClick.length} report click share`;
+  });
+
   // Budget Optimization (Department 2) — confirm campaign daily budgets are readable.
   const budget = await probe(async () => {
     const rows = (await adsSearch(
@@ -130,5 +152,5 @@ export async function GET(req: NextRequest) {
       : `${withBudget.length}/${rows.length} campaign(s) have a daily budget · total ₹${totalDaily.toFixed(0)}/day${top ? ` · top "${top.campaign?.name}" ₹${fromMicros(top.campaignBudget?.amountMicros).toFixed(0)}/day` : ""}`;
   });
 
-  return NextResponse.json({ configured, auth, campaigns, impressionShare, qualityScore, adGroups, keywords, searchTerms, assets, recommendations, conversionActions, daily, budget });
+  return NextResponse.json({ configured, auth, campaigns, impressionShare, qualityScore, adGroups, keywords, searchTerms, searchTermStatus, keywordShare, assets, recommendations, conversionActions, daily, budget });
 }

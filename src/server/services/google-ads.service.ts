@@ -92,19 +92,32 @@ export interface AdsDailyData {
 
 export interface AdsSearchTermRow {
   term: string;
+  campaign: string;
+  status: string; // ADDED / EXCLUDED / ADDED_EXCLUDED / NONE — has it been actioned as a keyword/negative?
   clicks: number;
   impressions: number;
   cost: number;
+  conversions: number;
 }
 
 export interface AdsKeywordRow {
   keyword: string;
-  matchType: string;
+  campaign: string;
+  matchType: string; // BROAD / PHRASE / EXACT
   status: string;
   clicks: number;
   impressions: number;
   cost: number;
+  conversions: number;
+  conversionValue: number;
+  ctr: number | null;
+  avgCpc: number | null;
+  cpa: number | null;
+  roas: number | null;
   qualityScore: number | null; // 1-10; null until Google has enough data
+  adRelevance: string | null; // creative_quality_score (BELOW/AVERAGE/ABOVE_AVERAGE)
+  landingPageExp: string | null; // post_click_quality_score
+  expectedCtr: string | null; // search_predicted_ctr
 }
 
 export interface AdsAdGroupRow {
@@ -390,35 +403,83 @@ export async function getAdGroups(): Promise<AdsAdGroupRow[]> {
   return rows.map((r) => ({ adGroup: r.adGroup?.name ?? "", campaign: r.campaign?.name ?? "", status: r.adGroup?.status ?? "" }));
 }
 
-export async function getKeywords(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsKeywordRow[]> {
+/** Quality-Score component enum → display string, or null when Google has no signal. */
+function qsComponent(v: unknown): string | null {
+  return typeof v === "string" && v !== "UNKNOWN" && v !== "UNSPECIFIED" ? v : null;
+}
+
+/**
+ * Keyword rows for an arbitrary GAQL date clause. Shared by getKeywords (preset
+ * window) and the keyword-trend prior-window fetch, so the query lives in one
+ * place. keyword_view only returns standard Search keywords (Smart/PMax have
+ * none), so the QS-component fields never trip the Smart/PMax incompatibility.
+ */
+async function fetchKeywordRows(dateClause: string): Promise<AdsKeywordRow[]> {
   const rows = (await adsSearch(
-    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+    `SELECT campaign.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status,
             ad_group_criterion.quality_info.quality_score,
-            metrics.clicks, metrics.impressions, metrics.cost_micros
-     FROM keyword_view WHERE ${duringClause(preset)} ORDER BY metrics.clicks DESC LIMIT 50`,
-  )) as { adGroupCriterion?: { keyword?: { text?: string; matchType?: string }; status?: string; qualityInfo?: { qualityScore?: number } }; metrics?: { clicks?: string; impressions?: string; costMicros?: string } }[];
+            ad_group_criterion.quality_info.creative_quality_score,
+            ad_group_criterion.quality_info.post_click_quality_score,
+            ad_group_criterion.quality_info.search_predicted_ctr,
+            metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions, metrics.conversions_value
+     FROM keyword_view WHERE ${dateClause} ORDER BY metrics.clicks DESC LIMIT 50`,
+  )) as {
+    campaign?: { name?: string };
+    adGroupCriterion?: {
+      keyword?: { text?: string; matchType?: string };
+      status?: string;
+      qualityInfo?: { qualityScore?: number; creativeQualityScore?: string; postClickQualityScore?: string; searchPredictedCtr?: string };
+    };
+    metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number; conversionsValue?: number };
+  }[];
   return rows
     .filter((r) => r.adGroupCriterion?.keyword?.text)
-    .map((r) => ({
-      keyword: r.adGroupCriterion!.keyword!.text!,
-      matchType: r.adGroupCriterion?.keyword?.matchType ?? "",
-      status: r.adGroupCriterion?.status ?? "",
-      clicks: Number(r.metrics?.clicks ?? 0),
-      impressions: Number(r.metrics?.impressions ?? 0),
-      cost: fromMicros(r.metrics?.costMicros),
-      qualityScore: typeof r.adGroupCriterion?.qualityInfo?.qualityScore === "number" ? r.adGroupCriterion.qualityInfo.qualityScore : null,
-    }));
+    .map((r) => {
+      const clicks = Number(r.metrics?.clicks ?? 0);
+      const impressions = Number(r.metrics?.impressions ?? 0);
+      const cost = fromMicros(r.metrics?.costMicros);
+      const conversions = Number(r.metrics?.conversions ?? 0);
+      const conversionValue = Number(r.metrics?.conversionsValue ?? 0);
+      const qi = r.adGroupCriterion?.qualityInfo;
+      return {
+        keyword: r.adGroupCriterion!.keyword!.text!,
+        campaign: r.campaign?.name ?? "",
+        matchType: r.adGroupCriterion?.keyword?.matchType ?? "",
+        status: r.adGroupCriterion?.status ?? "",
+        clicks,
+        impressions,
+        cost,
+        conversions,
+        conversionValue,
+        ctr: impressions > 0 ? clicks / impressions : null,
+        avgCpc: clicks > 0 ? cost / clicks : null,
+        cpa: conversions > 0 ? cost / conversions : null,
+        roas: cost > 0 && conversionValue > 0 ? conversionValue / cost : null,
+        qualityScore: typeof qi?.qualityScore === "number" ? qi.qualityScore : null,
+        adRelevance: qsComponent(qi?.creativeQualityScore),
+        landingPageExp: qsComponent(qi?.postClickQualityScore),
+        expectedCtr: qsComponent(qi?.searchPredictedCtr),
+      };
+    });
+}
+
+export async function getKeywords(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsKeywordRow[]> {
+  return fetchKeywordRows(duringClause(preset));
 }
 
 export async function getSearchTerms(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<AdsSearchTermRow[]> {
   const rows = (await adsSearch(
-    `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions, metrics.cost_micros
-     FROM search_term_view WHERE ${duringClause(preset)} ORDER BY metrics.clicks DESC LIMIT 25`,
-  )) as { searchTermView?: { searchTerm?: string }; metrics?: { clicks?: string; impressions?: string; costMicros?: string } }[];
+    `SELECT search_term_view.search_term, search_term_view.status, campaign.name,
+            metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions
+     FROM search_term_view WHERE ${duringClause(preset)} ORDER BY metrics.clicks DESC LIMIT 50`,
+  )) as { searchTermView?: { searchTerm?: string; status?: string }; campaign?: { name?: string }; metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number } }[];
   return rows
     .filter((r) => r.searchTermView?.searchTerm)
     .map((r) => ({
       term: r.searchTermView!.searchTerm!,
+      campaign: r.campaign?.name ?? "",
+      status: r.searchTermView?.status ?? "",
+      conversions: Number(r.metrics?.conversions ?? 0),
       clicks: Number(r.metrics?.clicks ?? 0),
       impressions: Number(r.metrics?.impressions ?? 0),
       cost: fromMicros(r.metrics?.costMicros),
@@ -778,6 +839,437 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
     campaigns,
     overspending,
     underspending,
+    recommendations,
+    alerts,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// ── Keyword Intelligence (Department 3) ─────────────────────────────────────
+// Composes the enriched getKeywords + getSearchTerms with an isolated keyword-
+// level impression/click-share query (Smart/PMax-safe, try/caught) plus a prior-
+// window keyword fetch for trend. Reuses summariseQualityScore, AdsRecommendation,
+// fromMicros and the same cache. Read-only; no new integration, no new table.
+
+export type KeywordPerf = "top" | "solid" | "watch" | "poor";
+
+export interface KeywordRowExt extends AdsKeywordRow {
+  healthScore: number; // 0-100
+  performance: KeywordPerf;
+  issues: string[];
+  impressionShare: number | null;
+  clickShare: number | null;
+  trend: "rising" | "falling" | "flat" | "new" | null; // vs prior equal window
+}
+
+export interface MatchTypeStat {
+  matchType: string; // BROAD / PHRASE / EXACT
+  count: number;
+  clicks: number;
+  impressions: number;
+  cost: number;
+  conversions: number;
+  ctr: number | null;
+  cpa: number | null;
+  roas: number | null;
+  avgQualityScore: number | null;
+}
+
+export interface KeywordOpportunity {
+  term: string;
+  campaign: string;
+  clicks: number;
+  conversions: number;
+  cost: number;
+  reason: string;
+}
+
+export interface NegativeSuggestion {
+  term: string;
+  campaign: string;
+  clicks: number;
+  cost: number;
+  reason: string;
+}
+
+export interface KeywordShareSummary {
+  available: boolean; // false = account has no Search keywords reporting share (Smart/PMax)
+  avgImpressionShare: number | null;
+  avgClickShare: number | null;
+  lostIsBudget: number | null;
+  lostIsRank: number | null;
+}
+
+export interface ConversionQualitySummary {
+  convertingKeywords: number;
+  conversions: number;
+  conversionValue: number;
+  cpa: number | null;
+  roas: number | null;
+  zeroConvSpendKeywords: number; // keywords spending with no conversions
+  wastedSpend: number; // spend on those keywords
+}
+
+export interface KeywordTrendSummary {
+  available: boolean;
+  rising: number;
+  falling: number;
+  newKeywords: number;
+  topMovers: { keyword: string; trend: string; clicks: number; priorClicks: number }[];
+}
+
+export interface KeywordIntelligence {
+  status: AdsSectionStatus;
+  reason?: string;
+  keywords: KeywordRowExt[];
+  highPerformers: KeywordRowExt[];
+  lowPerformers: KeywordRowExt[];
+  matchTypes: MatchTypeStat[];
+  searchTerms: AdsSearchTermRow[];
+  opportunities: KeywordOpportunity[];
+  negativeSuggestions: NegativeSuggestion[];
+  qualityScore: AdsQualityScoreSummary;
+  share: KeywordShareSummary;
+  conversionQuality: ConversionQualitySummary;
+  trend: KeywordTrendSummary;
+  healthScore: number; // 0-100 account-level keyword health
+  recommendations: AdsRecommendation[];
+  alerts: AdsRecommendation[];
+  generatedAt: string;
+}
+
+interface KeywordShareRow {
+  impressionShare: number | null;
+  clickShare: number | null;
+  lostIsBudget: number | null;
+  lostIsRank: number | null;
+}
+
+/**
+ * Keyword-level impression + click share — isolated & best-effort. Only standard
+ * Search keywords report these; Smart/PMax return INVALID_ARGUMENT. try/caught so
+ * it can never break the intelligence build. Keyed by lowercased keyword text.
+ */
+async function getKeywordShareMetrics(preset: AdsDatePreset): Promise<Map<string, KeywordShareRow>> {
+  const map = new Map<string, KeywordShareRow>();
+  try {
+    const rows = (await adsSearch(
+      `SELECT ad_group_criterion.keyword.text, metrics.search_impression_share, metrics.search_click_share,
+              metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
+       FROM keyword_view WHERE ${duringClause(preset)}`,
+    )) as { adGroupCriterion?: { keyword?: { text?: string } }; metrics?: { searchImpressionShare?: number; searchClickShare?: number; searchBudgetLostImpressionShare?: number; searchRankLostImpressionShare?: number } }[];
+    for (const r of rows) {
+      const text = r.adGroupCriterion?.keyword?.text;
+      if (!text) continue;
+      map.set(text.toLowerCase(), {
+        impressionShare: typeof r.metrics?.searchImpressionShare === "number" ? r.metrics.searchImpressionShare : null,
+        clickShare: typeof r.metrics?.searchClickShare === "number" ? r.metrics.searchClickShare : null,
+        lostIsBudget: typeof r.metrics?.searchBudgetLostImpressionShare === "number" ? r.metrics.searchBudgetLostImpressionShare : null,
+        lostIsRank: typeof r.metrics?.searchRankLostImpressionShare === "number" ? r.metrics.searchRankLostImpressionShare : null,
+      });
+    }
+  } catch {
+    /* Smart/PMax or no Search keywords — share simply unavailable. */
+  }
+  return map;
+}
+
+/** Prior equal-length window clause for a rolling preset (trend), else null. */
+function priorWindowClause(preset: AdsDatePreset): string | null {
+  if (preset !== "LAST_7_DAYS" && preset !== "LAST_30_DAYS") return null;
+  const days = preset === "LAST_7_DAYS" ? 7 : 30;
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const curEnd = new Date();
+  curEnd.setUTCDate(curEnd.getUTCDate() - 1); // presets end yesterday
+  const curStart = new Date(curEnd);
+  curStart.setUTCDate(curEnd.getUTCDate() - (days - 1));
+  const priorEnd = new Date(curStart);
+  priorEnd.setUTCDate(curStart.getUTCDate() - 1);
+  const priorStart = new Date(priorEnd);
+  priorStart.setUTCDate(priorEnd.getUTCDate() - (days - 1));
+  return `segments.date BETWEEN '${iso(priorStart)}' AND '${iso(priorEnd)}'`;
+}
+
+/** Per-keyword health (0-100) + evidence, from real metrics vs account CPA. */
+function scoreKeyword(k: AdsKeywordRow, accountCpa: number | null): { score: number; perf: KeywordPerf; issues: string[] } {
+  const issues: string[] = [];
+  let score = 100;
+  const paused = k.status !== "ENABLED";
+
+  if (!paused && k.cost > 0 && k.conversions === 0) {
+    score -= 40;
+    issues.push(`Spending ${k.cost.toFixed(0)} with 0 conversions`);
+  }
+  if (k.qualityScore != null && k.qualityScore <= 4) {
+    score -= 20;
+    issues.push(`Low Quality Score (${k.qualityScore}/10)`);
+  } else if (k.qualityScore != null && k.qualityScore <= 6) {
+    score -= 8;
+    issues.push(`Below-target Quality Score (${k.qualityScore}/10)`);
+  }
+  if (k.ctr != null && k.impressions >= 100 && k.ctr < 0.02) {
+    score -= 12;
+    issues.push(`Low CTR (${(k.ctr * 100).toFixed(1)}%)`);
+  }
+  if (k.cpa != null && accountCpa != null && accountCpa > 0 && k.cpa > accountCpa * 1.5) {
+    score -= 10;
+    issues.push(`CPA ${k.cpa.toFixed(0)} is ${(k.cpa / accountCpa).toFixed(1)}× the account average`);
+  }
+  if (k.landingPageExp === "BELOW_AVERAGE") {
+    score -= 6;
+    issues.push("Below-average landing page experience");
+  }
+  if (k.adRelevance === "BELOW_AVERAGE") {
+    score -= 6;
+    issues.push("Below-average ad relevance");
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const perf: KeywordPerf = k.conversions > 0 && score >= 70 ? "top" : score >= 80 ? "solid" : score >= 55 ? "watch" : "poor";
+  return { score, perf, issues };
+}
+
+export async function getKeywordIntelligence(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<KeywordIntelligence> {
+  return cached(`google-ads:keyword-intel:${preset}`, TTL.medium, () => buildKeywordIntelligence(preset));
+}
+
+async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordIntelligence> {
+  const empty: KeywordIntelligence = {
+    status: "NOT_CONFIGURED",
+    keywords: [],
+    highPerformers: [],
+    lowPerformers: [],
+    matchTypes: [],
+    searchTerms: [],
+    opportunities: [],
+    negativeSuggestions: [],
+    qualityScore: { avg: null, scored: 0, low: 0, lowKeywords: [] },
+    share: { available: false, avgImpressionShare: null, avgClickShare: null, lostIsBudget: null, lostIsRank: null },
+    conversionQuality: { convertingKeywords: 0, conversions: 0, conversionValue: 0, cpa: null, roas: null, zeroConvSpendKeywords: 0, wastedSpend: 0 },
+    trend: { available: false, rising: 0, falling: 0, newKeywords: 0, topMovers: [] },
+    healthScore: 0,
+    recommendations: [],
+    alerts: [],
+    generatedAt: new Date().toISOString(),
+  };
+  if (!adsConfigured()) return { ...empty, reason: "Google Ads API not connected (set GOOGLE_ADS_* env vars)." };
+
+  const priorClause = priorWindowClause(preset);
+  const [kwRes, termsRes, shareRes, priorRes] = await Promise.allSettled([
+    getKeywords(preset),
+    getSearchTerms(preset),
+    getKeywordShareMetrics(preset),
+    priorClause ? fetchKeywordRows(priorClause) : Promise.resolve<AdsKeywordRow[]>([]),
+  ]);
+
+  if (kwRes.status === "rejected") return { ...empty, status: "WAITING", reason: failReason(kwRes.reason) };
+  const keywords = kwRes.value;
+  const searchTerms = termsRes.status === "fulfilled" ? termsRes.value : [];
+  const shareMap = shareRes.status === "fulfilled" ? shareRes.value : new Map<string, KeywordShareRow>();
+  const priorRows = priorRes.status === "fulfilled" ? priorRes.value : [];
+
+  if (keywords.length === 0 && searchTerms.length === 0) {
+    return {
+      ...empty,
+      status: "WAITING",
+      reason: "No keyword or search-term data yet — the account may use only Smart/Performance-Max campaigns (no manual keywords) or have no search activity in this window.",
+    };
+  }
+
+  // Account CPA benchmark (from keyword sums) for relative scoring.
+  const totalCost = keywords.reduce((s, k) => s + k.cost, 0);
+  const totalConv = keywords.reduce((s, k) => s + k.conversions, 0);
+  const accountCpa = totalConv > 0 ? totalCost / totalConv : null;
+
+  // Prior-window click index for trend.
+  const priorClicks = new Map<string, number>();
+  for (const k of priorRows) priorClicks.set(k.keyword.toLowerCase(), (priorClicks.get(k.keyword.toLowerCase()) ?? 0) + k.clicks);
+
+  const enriched: KeywordRowExt[] = keywords.map((k) => {
+    const { score, perf, issues } = scoreKeyword(k, accountCpa);
+    const share = shareMap.get(k.keyword.toLowerCase());
+    let trend: KeywordRowExt["trend"] = null;
+    if (priorClause) {
+      const prev = priorClicks.get(k.keyword.toLowerCase());
+      if (prev === undefined) trend = k.clicks > 0 ? "new" : null;
+      else if (k.clicks > prev * 1.2) trend = "rising";
+      else if (k.clicks < prev * 0.8) trend = "falling";
+      else trend = "flat";
+    }
+    return {
+      ...k,
+      healthScore: score,
+      performance: perf,
+      issues,
+      impressionShare: share?.impressionShare ?? null,
+      clickShare: share?.clickShare ?? null,
+      trend,
+    };
+  });
+
+  // High / low performers.
+  const highPerformers = enriched
+    .filter((k) => k.conversions > 0 || (k.clicks > 0 && k.healthScore >= 80))
+    .sort((a, b) => b.conversions - a.conversions || (b.roas ?? 0) - (a.roas ?? 0) || (b.ctr ?? 0) - (a.ctr ?? 0))
+    .slice(0, 10);
+  const lowPerformers = enriched
+    .filter((k) => k.performance === "poor" || (k.cost > 0 && k.conversions === 0) || (k.qualityScore != null && k.qualityScore <= 4))
+    .sort((a, b) => a.healthScore - b.healthScore || b.cost - a.cost)
+    .slice(0, 10);
+
+  // Match-type analysis.
+  const matchTypes = ["BROAD", "PHRASE", "EXACT"]
+    .map((mt) => {
+      const rows = enriched.filter((k) => k.matchType === mt);
+      if (rows.length === 0) return null;
+      const clicks = rows.reduce((s, k) => s + k.clicks, 0);
+      const impressions = rows.reduce((s, k) => s + k.impressions, 0);
+      const cost = rows.reduce((s, k) => s + k.cost, 0);
+      const conversions = rows.reduce((s, k) => s + k.conversions, 0);
+      const value = rows.reduce((s, k) => s + k.conversionValue, 0);
+      const scored = rows.filter((k) => k.qualityScore != null);
+      return {
+        matchType: mt,
+        count: rows.length,
+        clicks,
+        impressions,
+        cost,
+        conversions,
+        ctr: impressions > 0 ? clicks / impressions : null,
+        cpa: conversions > 0 ? cost / conversions : null,
+        roas: cost > 0 && value > 0 ? value / cost : null,
+        avgQualityScore: scored.length > 0 ? scored.reduce((s, k) => s + (k.qualityScore as number), 0) / scored.length : null,
+      } satisfies MatchTypeStat;
+    })
+    .filter((m): m is MatchTypeStat => m !== null);
+
+  // Opportunities: search terms with traction not yet added as keywords.
+  const opportunities: KeywordOpportunity[] = searchTerms
+    .filter((t) => t.status !== "ADDED" && t.status !== "ADDED_EXCLUDED" && (t.conversions > 0 || t.clicks >= 2))
+    .sort((a, b) => b.conversions - a.conversions || b.clicks - a.clicks)
+    .slice(0, 12)
+    .map((t) => ({
+      term: t.term,
+      campaign: t.campaign,
+      clicks: t.clicks,
+      conversions: t.conversions,
+      cost: t.cost,
+      reason: t.conversions > 0 ? `Converted ${t.conversions.toFixed(0)}× as a search term — add as an exact/phrase keyword.` : `${t.clicks} clicks with no keyword — consider adding to capture intent.`,
+    }));
+
+  // Negative suggestions: spending search terms with no conversions, not excluded.
+  const negativeSuggestions: NegativeSuggestion[] = searchTerms
+    .filter((t) => t.status !== "EXCLUDED" && t.status !== "ADDED_EXCLUDED" && t.conversions === 0 && (t.cost > 0 || t.clicks >= 3))
+    .sort((a, b) => b.cost - a.cost || b.clicks - a.clicks)
+    .slice(0, 12)
+    .map((t) => ({
+      term: t.term,
+      campaign: t.campaign,
+      clicks: t.clicks,
+      cost: t.cost,
+      reason: t.cost > 0 ? `Spent ${t.cost.toFixed(0)} over ${t.clicks} click(s) with 0 conversions — review as a negative.` : `${t.clicks} clicks, no conversions — review relevance.`,
+    }));
+
+  const qualityScore = summariseQualityScore(keywords);
+
+  // Impression / click share summary (impression-weighted where possible).
+  const shareRows = enriched.filter((k) => k.impressionShare != null || k.clickShare != null);
+  const share: KeywordShareSummary = {
+    available: shareRows.length > 0,
+    avgImpressionShare: impressionWeightedAvg(enriched, (k) => k.impressionShare),
+    avgClickShare: impressionWeightedAvg(enriched, (k) => k.clickShare),
+    lostIsBudget: impressionWeightedAvg(
+      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.keyword.toLowerCase())?.lostIsBudget ?? null })),
+      (r) => r.v,
+    ),
+    lostIsRank: impressionWeightedAvg(
+      enriched.map((k) => ({ impressions: k.impressions, v: shareMap.get(k.keyword.toLowerCase())?.lostIsRank ?? null })),
+      (r) => r.v,
+    ),
+  };
+
+  // Conversion quality.
+  const converting = enriched.filter((k) => k.conversions > 0);
+  const zeroConvSpend = enriched.filter((k) => k.status === "ENABLED" && k.cost > 0 && k.conversions === 0);
+  const totalValue = enriched.reduce((s, k) => s + k.conversionValue, 0);
+  const conversionQuality: ConversionQualitySummary = {
+    convertingKeywords: converting.length,
+    conversions: totalConv,
+    conversionValue: totalValue,
+    cpa: accountCpa,
+    roas: totalCost > 0 && totalValue > 0 ? totalValue / totalCost : null,
+    zeroConvSpendKeywords: zeroConvSpend.length,
+    wastedSpend: zeroConvSpend.reduce((s, k) => s + k.cost, 0),
+  };
+
+  // Trend summary.
+  const movers = enriched
+    .filter((k) => k.trend === "rising" || k.trend === "falling")
+    .map((k) => ({ keyword: k.keyword, trend: k.trend as string, clicks: k.clicks, priorClicks: priorClicks.get(k.keyword.toLowerCase()) ?? 0 }))
+    .sort((a, b) => Math.abs(b.clicks - b.priorClicks) - Math.abs(a.clicks - a.priorClicks))
+    .slice(0, 8);
+  const trend: KeywordTrendSummary = {
+    available: priorClause !== null,
+    rising: enriched.filter((k) => k.trend === "rising").length,
+    falling: enriched.filter((k) => k.trend === "falling").length,
+    newKeywords: enriched.filter((k) => k.trend === "new").length,
+    topMovers: movers,
+  };
+
+  // Account-level keyword health = mean of per-keyword health (enabled keywords).
+  const enabledScores = enriched.filter((k) => k.status === "ENABLED").map((k) => k.healthScore);
+  const healthScore = enabledScores.length > 0 ? Math.round(enabledScores.reduce((s, v) => s + v, 0) / enabledScores.length) : enriched.length > 0 ? Math.round(enriched.reduce((s, k) => s + k.healthScore, 0) / enriched.length) : 0;
+
+  // Recommendations + alerts.
+  const recommendations: AdsRecommendation[] = [];
+  const alerts: AdsRecommendation[] = [];
+
+  if (opportunities.length > 0) {
+    const conv = opportunities.filter((o) => o.conversions > 0);
+    const top = conv[0] ?? opportunities[0];
+    recommendations.push({
+      priority: conv.length > 0 ? "high" : "medium",
+      title: `${opportunities.length} keyword opportunity(ies) from search terms`,
+      detail: top ? `Top: "${top.term}" — ${top.reason}` : "",
+    });
+  }
+  if (negativeSuggestions.length > 0) {
+    recommendations.push({
+      priority: conversionQuality.wastedSpend > 0 ? "high" : "medium",
+      title: `${negativeSuggestions.length} negative-keyword suggestion(s)`,
+      detail: `Review non-converting search terms${conversionQuality.wastedSpend > 0 ? ` (≈${conversionQuality.wastedSpend.toFixed(0)} wasted spend)` : ""}: ${negativeSuggestions.slice(0, 3).map((n) => `"${n.term}"`).join(", ")}.`,
+    });
+  }
+  if (qualityScore.low > 0) {
+    recommendations.push({ priority: "medium", title: `${qualityScore.low} low Quality-Score keyword(s)`, detail: `Improve ad relevance / landing pages for: ${qualityScore.lowKeywords.join(", ")}.` });
+  }
+  if (share.available && share.lostIsBudget != null && share.lostIsBudget >= 0.1) {
+    recommendations.push({ priority: "medium", title: `Losing ${(share.lostIsBudget * 100).toFixed(0)}% keyword impression share to budget`, detail: "Budget-limited keywords are missing impressions — raise budget or tighten targeting." });
+  }
+  if (zeroConvSpend.length > 0) {
+    alerts.push({ priority: conversionQuality.wastedSpend > 0 ? "high" : "medium", title: `${zeroConvSpend.length} keyword(s) spending with 0 conversions`, detail: `≈${conversionQuality.wastedSpend.toFixed(0)} spent without conversions — verify tracking, then pause or add negatives.` });
+  }
+  if (share.available && share.lostIsRank != null && share.lostIsRank >= 0.2) {
+    alerts.push({ priority: "medium", title: `Losing ${(share.lostIsRank * 100).toFixed(0)}% keyword impression share to rank`, detail: "Improve bids and Quality Score to recover rank-lost impressions." });
+  }
+  if (keywords.length > 0 && converting.length === 0 && totalCost > 0) {
+    alerts.push({ priority: "high", title: "No keywords have converted this period", detail: "Check conversion tracking and landing-page relevance before scaling keyword spend." });
+  }
+
+  return {
+    status: "LIVE",
+    keywords: enriched,
+    highPerformers,
+    lowPerformers,
+    matchTypes,
+    searchTerms,
+    opportunities,
+    negativeSuggestions,
+    qualityScore,
+    share,
+    conversionQuality,
+    trend,
+    healthScore,
     recommendations,
     alerts,
     generatedAt: new Date().toISOString(),
