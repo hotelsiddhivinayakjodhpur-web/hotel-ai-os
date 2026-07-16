@@ -14,8 +14,10 @@ import { listContent } from "./content.service";
 const log = logger.child({ component: "google-ads-service" });
 
 /**
- * Google Ads AI — data layer. READ-ONLY by design: never creates or edits
- * campaigns; no Google Ads write API anywhere. Consumes:
+ * Google Ads AI — data layer. This module is READ-ONLY: it never mutates the
+ * account. Account-changing operations live behind the Governance policy
+ * (server/google-ads/governance.ts) — analysed and planned here, executed only
+ * on an explicit owner command, never automatically. Consumes:
  *  - The OFFICIAL Google Ads API (GAQL via google-ads-client; developer token +
  *    OAuth through the MCC) — every section degrades to an honest reason;
  *  - Content AI (OFFER + FESTIVAL channels) as campaign-asset queue/calendar.

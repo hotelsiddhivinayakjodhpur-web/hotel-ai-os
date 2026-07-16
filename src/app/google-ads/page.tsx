@@ -30,7 +30,7 @@ export default async function GoogleAdsDashboard() {
         <div className="grid gap-4 md:grid-cols-3">
           <StatusCard name="Google Ads API (official, via MCC)" ok={c.status === "LIVE"} detail={c.status === "LIVE" ? "Delivering data" : (c.reason ?? "Not connected")} />
           <StatusCard name="Content AI (offers & festivals)" ok detail="Campaign-asset source · ContentItem" />
-          <StatusCard name="Google Ads write API" ok={false} detail="Intentionally never used — read-only architecture" />
+          <StatusCard name="Google Ads write API" ok={false} detail="Governed — executes only on explicit owner command; currently disabled" />
         </div>
       </Section>
 
