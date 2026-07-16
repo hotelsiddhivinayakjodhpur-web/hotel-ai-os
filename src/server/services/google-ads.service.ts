@@ -10,6 +10,8 @@ import {
   type AdsDatePreset,
 } from "@/server/integrations/google-ads-client";
 import { listContent } from "./content.service";
+import { listCompetitors } from "./instagram.service";
+import { getSeoReport } from "./seo.service";
 
 const log = logger.child({ component: "google-ads-service" });
 
@@ -1385,6 +1387,180 @@ async function buildKeywordIntelligence(preset: AdsDatePreset): Promise<KeywordI
     healthScore,
     recommendations,
     alerts,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// ── Competitor Intelligence (Department 5) ──────────────────────────────────
+// Two operating modes, both on REAL data only:
+//   Mode A (LIVE_AUCTION) — once campaigns generate Search impressions, competitive
+//     pressure is derived from our own real impression-share metrics (reusing the
+//     isolated getImpressionShare from Dept 1).
+//   Mode B (PRE_LAUNCH)  — competitor registry (shared CompetitorNote table) across
+//     Search / Maps / OTA / local-hotel channels, plus REAL Search Console queries
+//     we already compete on. No fabricated competitors, ratings or prices.
+//
+// IMPORTANT: Google does NOT expose the Auction Insights report (competitor domains)
+// through the Google Ads API — it is Google Ads UI only. So competitor IDENTITY can
+// never come from the API; it comes from the operator's registry. What the API does
+// give us is our own share and how much of it we lose to competitors outranking us.
+
+export type CompetitorChannel = "GOOGLE_ADS" | "GOOGLE_SEARCH" | "GOOGLE_MAPS" | "OTA" | "LOCAL_HOTEL";
+
+export const COMPETITOR_CHANNELS: { id: CompetitorChannel; label: string; hint: string }[] = [
+  { id: "GOOGLE_ADS", label: "Google Ads", hint: "Advertisers seen on your search terms" },
+  { id: "GOOGLE_SEARCH", label: "Google Search", hint: "Hotels outranking you organically" },
+  { id: "GOOGLE_MAPS", label: "Google Maps", hint: "Nearby hotels in the local pack" },
+  { id: "OTA", label: "OTA", hint: "Booking.com / MakeMyTrip / Agoda listings" },
+  { id: "LOCAL_HOTEL", label: "Local hotels", hint: "Direct rivals in the city" },
+];
+
+export interface CompetitorEntry {
+  channel: CompetitorChannel;
+  name: string;
+  note: string | null;
+  recordedAt: string;
+}
+
+export interface AuctionInsightsStatus {
+  available: boolean;
+  reason: string;
+  campaignsReporting: number;
+  avgImpressionShare: number | null;
+  lostToRank: number | null; // share lost because competitors outranked us
+  lostToBudget: number | null;
+}
+
+export interface ContestedQuery {
+  query: string;
+  clicks: number;
+  impressions: number;
+  position: number | null;
+}
+
+export interface CompetitorChannelCoverage {
+  channel: CompetitorChannel;
+  label: string;
+  hint: string;
+  count: number;
+  entries: CompetitorEntry[];
+}
+
+export interface CompetitorIntelligence {
+  status: AdsSectionStatus;
+  reason?: string;
+  mode: "LIVE_AUCTION" | "PRE_LAUNCH";
+  auctionInsights: AuctionInsightsStatus;
+  coverage: CompetitorChannelCoverage[];
+  totalCompetitors: number;
+  contestedQueries: ContestedQuery[];
+  recommendations: AdsRecommendation[];
+  generatedAt: string;
+}
+
+export async function getCompetitorIntelligence(preset: AdsDatePreset = "LAST_30_DAYS"): Promise<CompetitorIntelligence> {
+  return cached(`google-ads:competitor-intel:${preset}`, TTL.medium, () => buildCompetitorIntelligence(preset));
+}
+
+async function buildCompetitorIntelligence(preset: AdsDatePreset): Promise<CompetitorIntelligence> {
+  // Registry + organic queries work with or without the Ads API, so they are
+  // fetched regardless of whether Google Ads is connected.
+  const [campRes, isRes, seoRes, ...channelRes] = await Promise.allSettled([
+    adsConfigured() ? getCampaigns(preset) : Promise.resolve<AdsCampaignsData | null>(null),
+    adsConfigured() ? getImpressionShare(preset) : Promise.resolve(new Map<string, CampaignIsRow>()),
+    getSeoReport(),
+    ...COMPETITOR_CHANNELS.map((c) => listCompetitors(c.id)),
+  ]);
+
+  // ── Competitor registry (shared CompetitorNote table — no new storage) ──
+  const coverage: CompetitorChannelCoverage[] = COMPETITOR_CHANNELS.map((c, i) => {
+    const res = channelRes[i];
+    const rows = res && res.status === "fulfilled" ? res.value : [];
+    return {
+      channel: c.id,
+      label: c.label,
+      hint: c.hint,
+      count: rows.length,
+      entries: rows.map((r) => ({ channel: c.id, name: r.handle, note: r.note, recordedAt: r.recordedAt })),
+    };
+  });
+  const totalCompetitors = coverage.reduce((s, c) => s + c.count, 0);
+
+  // ── Real organic queries we already compete on (Search Console) ──
+  const seo = seoRes.status === "fulfilled" ? seoRes.value : null;
+  const contestedQueries: ContestedQuery[] =
+    seo?.configured && Array.isArray(seo.topQueries)
+      ? seo.topQueries.slice(0, 12).map((q) => ({
+          query: q.key,
+          clicks: q.clicks,
+          impressions: q.impressions,
+          position: typeof q.position === "number" ? q.position : null,
+        }))
+      : [];
+
+  // ── Mode A: competitive pressure from our own REAL impression share ──
+  const campaigns = campRes.status === "fulfilled" ? campRes.value : null;
+  const isMap = isRes.status === "fulfilled" ? isRes.value : new Map<string, CampaignIsRow>();
+  const withIs = (campaigns?.rows ?? [])
+    .map((r) => ({ impressions: r.impressions, is: isMap.get(r.campaign) }))
+    .filter((r) => r.is && r.is.impressionShare != null);
+
+  const auctionInsights: AuctionInsightsStatus = {
+    available: withIs.length > 0,
+    reason:
+      withIs.length > 0
+        ? "Competitive pressure derived from live Search impression share."
+        : "Live Google Ads Auction Insights not yet available.",
+    campaignsReporting: withIs.length,
+    avgImpressionShare: impressionWeightedAvg(withIs, (r) => r.is?.impressionShare ?? null),
+    lostToRank: impressionWeightedAvg(withIs, (r) => r.is?.lostIsRank ?? null),
+    lostToBudget: impressionWeightedAvg(withIs, (r) => r.is?.lostIsBudget ?? null),
+  };
+  const mode: CompetitorIntelligence["mode"] = auctionInsights.available ? "LIVE_AUCTION" : "PRE_LAUNCH";
+
+  // ── Recommendations (from real signals + registry coverage gaps) ──
+  const recommendations: AdsRecommendation[] = [];
+  const emptyChannels = coverage.filter((c) => c.count === 0);
+  if (emptyChannels.length > 0) {
+    recommendations.push({
+      priority: totalCompetitors === 0 ? "high" : "medium",
+      title: `${emptyChannels.length} competitor channel(s) with no entries`,
+      detail: `Add the rivals you actually see for: ${emptyChannels.map((c) => c.label).join(", ")}. Competitor identity cannot come from the Google Ads API — Auction Insights is UI-only — so this registry is the source of truth.`,
+    });
+  }
+  if (mode === "PRE_LAUNCH") {
+    recommendations.push({
+      priority: "medium",
+      title: "Pre-launch mode — build the competitive baseline now",
+      detail: "No Search impressions yet, so auction data cannot exist. Record competitors per channel and use the contested organic queries below to choose which terms to defend first.",
+    });
+  }
+  if (contestedQueries.length > 0) {
+    const top = contestedQueries[0];
+    if (top) {
+      recommendations.push({
+        priority: "low",
+        title: `${contestedQueries.length} organic queries already compete for you`,
+        detail: `Top: "${top.query}" (${top.clicks} clicks, ${top.impressions} impressions${top.position !== null ? `, avg position ${top.position.toFixed(1)}` : ""}) — real Search Console data, useful as a paid-search starting set.`,
+      });
+    }
+  }
+  if (auctionInsights.available && auctionInsights.lostToRank != null && auctionInsights.lostToRank >= 0.2) {
+    recommendations.push({
+      priority: "high",
+      title: `Losing ${(auctionInsights.lostToRank * 100).toFixed(0)}% impression share to competitors outranking you`,
+      detail: "Raise bids or improve Quality Score to recover rank-lost impressions. Check Auction Insights in the Google Ads UI to see which domains.",
+    });
+  }
+
+  return {
+    status: "LIVE",
+    mode,
+    auctionInsights,
+    coverage,
+    totalCompetitors,
+    contestedQueries,
+    recommendations,
     generatedAt: new Date().toISOString(),
   };
 }
