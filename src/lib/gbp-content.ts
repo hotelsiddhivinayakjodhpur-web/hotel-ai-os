@@ -1,4 +1,4 @@
-import { ATTRACTIONS, HOTEL } from "./hotel-facts";
+import { ATTRACTIONS, HOTEL, pageUrl } from "./hotel-facts";
 
 /**
  * Deterministic, template-based content generators for Google Business Profile.
@@ -89,7 +89,7 @@ export function generateDailyPost(theme: PostTheme, detail: string, seed = ""): 
         body:
           `Visiting ${spot}? ${HOTEL.name} is an easy base for exploring ${HOTEL.city}'s landmarks. ` +
           `Stay close to the sights and travel light. ${HOTEL.bookingNote}`,
-        cta: "LEARN_MORE — " + HOTEL.website + "/attractions",
+        cta: "LEARN_MORE — " + pageUrl("attractions"),
       };
     }
     case "direct-booking":

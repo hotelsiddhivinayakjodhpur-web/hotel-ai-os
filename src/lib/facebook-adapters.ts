@@ -1,4 +1,4 @@
-import { HOTEL } from "./hotel-facts";
+import { HOTEL, pageUrl } from "./hotel-facts";
 // Shared hashtag groups — reused from the Instagram adapter layer (single source).
 import { HASHTAG_GROUPS } from "./instagram-adapters";
 
@@ -41,7 +41,7 @@ export function adaptToFacebook(source: FbSource, format: FbFormat): string {
 
   switch (format) {
     case "attraction":
-      return `📍 Exploring ${HOTEL.city}?\n\n${core}\n\nStay nearby at ${HOTEL.name} and see it all with ease.\n👉 ${site}/attractions`;
+      return `📍 Exploring ${HOTEL.city}?\n\n${core}\n\nStay nearby at ${HOTEL.name} and see it all with ease.\n👉 ${pageUrl("attractions")}`;
     case "festival":
       return `✨ ${source.title.replace(/^[A-Za-z ]+—\s*/, "")}\n\n${core}\n\nRooms fill fast around festival dates — plan your stay at ${HOTEL.name}.\n👉 ${site}\n\n[OPERATOR: confirm the festival dates before publishing.]`;
     case "offer":

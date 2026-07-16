@@ -1,4 +1,4 @@
-import { ATTRACTIONS, HOTEL } from "./hotel-facts";
+import { ATTRACTIONS, HOTEL, pageUrl } from "./hotel-facts";
 
 /**
  * Content AI — deterministic, template-based generators for channels beyond
@@ -174,7 +174,7 @@ export function generateAttractionGuide(attraction: string): { title: string; bo
       `Timings & tickets: [OPERATOR: verify current timings and fees before publishing]`,
       `Staff tip: [OPERATOR: one genuine local tip from the team]`,
       ``,
-      `Plan your visit and stay at ${HOTEL.name} — ${HOTEL.website}/attractions`,
+      `Plan your visit and stay at ${HOTEL.name} — ${pageUrl("attractions")}`,
     ].join("\n"),
   };
 }

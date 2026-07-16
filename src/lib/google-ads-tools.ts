@@ -1,4 +1,4 @@
-import { HOTEL, ATTRACTIONS } from "./hotel-facts";
+import { HOTEL, ATTRACTIONS, pageUrl } from "./hotel-facts";
 
 /**
  * Google Ads AI — deterministic planning tools and ADAPTERS, not generators.
@@ -406,7 +406,7 @@ export function landingPageRecommendations(topPages: { key: string; clicks: numb
   const recs: LandingRec[] = [
     { theme: "Brand & direct-booking ads", url: site, why: "Homepage carries the booking engine and full trust signals." },
     { theme: "Room / rate ads", url: `${site}/rooms`, why: "Matches room-intent queries; shortest path to booking." },
-    { theme: "Attraction-intent ads", url: `${site}/attractions`, why: "Relevance for “hotel near [attraction]” searches." },
+    { theme: "Attraction-intent ads", url: pageUrl("attractions"), why: "Relevance for “hotel near [attraction]” searches." },
     { theme: "Dining ads", url: `${site}/restaurant`, why: "Existing restaurant page matches food-intent clicks." },
   ];
   const organicWinners = topPages.slice(0, 3).map((p) => p.key);

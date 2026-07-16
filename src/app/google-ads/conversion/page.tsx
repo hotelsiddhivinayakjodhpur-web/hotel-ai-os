@@ -32,6 +32,50 @@ export default async function ConversionPage() {
         </div>
       </Section>
 
+      {/* Tasks 2/3 — GA4 event + Google Ads conversion readiness */}
+      <Section title="Conversion Tracking Readiness">
+        <Card>
+          <div className="mb-3 flex items-start gap-3">
+            <Pill tone={c.readiness.adsReceiving ? "ok" : "warn"}>{c.readiness.adsReceiving ? "Live" : "Waiting for Production Conversion Data"}</Pill>
+            <div className="min-w-0">
+              <p className="text-sm text-text">{c.readiness.status}</p>
+              <p className="mt-1 text-xs text-muted">
+                Micro events live: {c.readiness.microReady}/7 · Macro events live: {c.readiness.macroReady}/3 · Google Ads conversion actions: {c.readiness.adsConversionActions.length}
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-muted">
+                  <th className="pb-2">Event</th>
+                  <th className="pb-2">Purpose</th>
+                  <th className="pb-2 text-right">Type</th>
+                  <th className="pb-2 text-right">In GA4</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.readiness.requirements.map((r) => (
+                  <tr key={r.event} className="border-t border-border/60">
+                    <td className="py-2 font-mono text-xs text-text">{r.event}</td>
+                    <td className="py-2 text-xs text-muted">{r.purpose}</td>
+                    <td className="py-2 text-right"><Pill tone={r.kind === "macro" ? "info" : "muted"}>{r.kind}</Pill></td>
+                    <td className="py-2 text-right"><Pill tone={r.presentInGa4 ? "ok" : "crit"}>{r.presentInGa4 ? "live" : "missing"}</Pill></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {c.readiness.blockers.length > 0 && (
+            <ul className="mt-3 space-y-1 border-t border-border/60 pt-3">
+              {c.readiness.blockers.map((b, i) => (
+                <li key={i} className="text-xs text-muted">• {b}</li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </Section>
+
       {/* Module 4 — Funnel */}
       <Section title="Conversion Funnel">
         <Card>
@@ -73,11 +117,25 @@ export default async function ConversionPage() {
               ) : (
                 <>
                   {p.h1 && <p className="mb-2 truncate text-xs text-muted" title={p.h1}>H1: {p.h1}</p>}
-                  <div className="flex flex-wrap gap-1">
-                    {p.checks.map((ck) => (
-                      <Pill key={ck.id} tone={ck.present ? "ok" : ck.weight >= 8 ? "crit" : "muted"}>{ck.label}</Pill>
+                  {/* Weighted breakdown — every category shows earned/max */}
+                  <ul className="mb-2 space-y-0.5">
+                    {p.categories.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className={c.earned === c.max ? "text-muted" : "text-text"}>{c.label}</span>
+                        <span className={c.earned === c.max ? "text-muted" : c.earned === 0 ? "text-crit" : "text-warn"}>{c.earned}/{c.max}</span>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
+                  {/* Every deduction explains WHY — never just a number */}
+                  {p.deductions.length > 0 && (
+                    <ul className="space-y-1 border-t border-border/60 pt-2">
+                      {p.deductions.map((d, i) => (
+                        <li key={i} className="text-xs text-muted">
+                          <span className="font-medium text-crit">−{d.points}</span> {d.why}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               )}
             </Card>
