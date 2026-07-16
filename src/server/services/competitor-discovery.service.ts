@@ -132,32 +132,56 @@ export interface CompetitorDiscovery {
 }
 
 // Tokens that mark a query as naming a lodging business.
-const LODGING_RE = /\b(hotel|resort|palace|haveli|guest\s*house|guesthouse|inn|lodge|homestay|villa|hostel)\b/i;
+const LODGING_RE = /\b(hotel|hotels|resort|palace|haveli|guest\s*house|guesthouse|inn|lodge|homestay|villa|hostel|dharamshala)\b/i;
 // Our own brand — never propose ourselves.
 const OWN_BRAND_RE = /siddhi\s*vinayak|siddhivinayak/i;
-// Generic/intent words that make a query NOT a brand name.
-const GENERIC_RE = /\b(near me|best|cheap|budget|top|book|booking|price|rate|deal|offer|in|the|list|photos|review|reviews)\b/gi;
 
 /**
- * Extract a plausible rival brand from a real query. Returns null unless the query
- * clearly names a lodging business that is not us — we would rather propose nothing
- * than propose noise.
+ * Vocabulary that is NEVER a brand: lodging nouns, star ratings, geography and
+ * search-intent words. A query is only a competitor CANDIDATE if something
+ * survives after every one of these is stripped — that survivor is the brand.
+ * Without this, "3 star hotel in jodhpur" and "hotel near railway station" look
+ * like businesses; they are just descriptions, and adding them would poison the
+ * shared registry that eight departments read.
+ */
+const GENERIC_VOCAB = new Set([
+  // lodging nouns
+  "hotel", "hotels", "resort", "resorts", "palace", "haveli", "guest", "guesthouse", "house", "inn", "lodge",
+  "homestay", "villa", "hostel", "dharamshala", "room", "rooms", "suite", "deluxe", "standard", "ac", "non",
+  // ratings / qualifiers
+  "star", "stars", "rated", "rating", "three", "four", "five", "two", "one", "budget", "cheap", "cheapest",
+  "luxury", "luxurious", "best", "top", "good", "affordable", "premium", "backpacker", "family", "couple",
+  "friendly", "comfortable", "nice", "new", "old",
+  // geography / intent
+  "near", "nearby", "me", "in", "at", "the", "and", "for", "with", "railway", "station", "bus", "stand",
+  "airport", "road", "city", "centre", "center", "fort", "market", "rajasthan", "india", "jodhpur",
+  // transactional
+  "book", "booking", "price", "prices", "rate", "rates", "deal", "deals", "offer", "offers", "stay", "night",
+  "nights", "online", "list", "photos", "photo", "review", "reviews", "contact", "number", "address", "today",
+]);
+
+function isGenericToken(t: string): boolean {
+  return GENERIC_VOCAB.has(t) || /^\d+$/.test(t) || t.length < 3;
+}
+
+/**
+ * Extract a plausible rival BRAND from a real query. Returns null unless a genuine
+ * proper-noun survives the generic vocabulary — we would rather propose nothing
+ * than propose noise into the shared registry.
  */
 function candidateNameFrom(query: string): string | null {
-  const raw = query.trim();
+  const raw = query.trim().toLowerCase();
   if (!LODGING_RE.test(raw)) return null;
   if (OWN_BRAND_RE.test(raw)) return null;
 
-  const cleaned = raw
-    .replace(new RegExp(`\\b${city}\\b`, "gi"), " ")
-    .replace(GENERIC_RE, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const tokens = raw.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const brandTokens = tokens.filter((t) => !isGenericToken(t));
+  // Nothing distinctive survived → it was a description, not a business.
+  if (brandTokens.length === 0 || brandTokens.length > 3) return null;
 
-  // Needs a real proper-noun-ish remainder beyond the lodging word itself.
-  const withoutLodging = cleaned.replace(LODGING_RE, " ").replace(/\s+/g, " ").trim();
-  if (withoutLodging.length < 3 || withoutLodging.split(" ").length > 5) return null;
-  return cleaned.length >= 4 ? cleaned : null;
+  // Present the brand with its lodging noun for a recognisable registry entry.
+  const brand = brandTokens.join(" ");
+  return `${brand} hotel`.trim();
 }
 
 export async function getCompetitorDiscovery(): Promise<CompetitorDiscovery> {
