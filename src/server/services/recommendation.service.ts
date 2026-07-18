@@ -14,6 +14,7 @@ import {
   getCompetitorIntelligence,
 } from "./google-ads.service";
 import { getConversionIntelligence } from "./conversion.service";
+import { getConversionAttribution } from "./conversion-attribution.service";
 import { listRecommendationStates } from "@/server/repositories/recommendation.repository";
 // Single canonical source for the recommendation vocabulary + shapes.
 import {
@@ -158,7 +159,7 @@ export async function getRecommendationEngine(): Promise<RecommendationEngine> {
 }
 
 async function buildRecommendationEngine(): Promise<RecommendationEngine> {
-  const [exec, ig, fb, yt, gads, mads, gbp, campaign, budget, keyword, competitor, conversion, states] =
+  const [exec, ig, fb, yt, gads, mads, gbp, campaign, budget, keyword, competitor, conversion, attribution, states] =
     await Promise.allSettled([
       getExecutiveView(),
       getInstagramOverview(),
@@ -172,6 +173,7 @@ async function buildRecommendationEngine(): Promise<RecommendationEngine> {
       getKeywordIntelligence("LAST_30_DAYS"),
       getCompetitorIntelligence("LAST_30_DAYS"),
       getConversionIntelligence(),
+      getConversionAttribution(),
       listRecommendationStates(),
     ]);
 
@@ -243,6 +245,15 @@ async function buildRecommendationEngine(): Promise<RecommendationEngine> {
     }
     note("Conversion AI", true);
   } else note("Conversion AI", false, failText(conversion.reason));
+
+  // Department 7 — Conversion & Revenue Intelligence publishes here rather than
+  // owning a second recommendation system.
+  if (attribution.status === "fulfilled") {
+    for (const r of [...attribution.value.alerts, ...attribution.value.recommendations]) {
+      raw.push({ ...r, department: "Conversion & Revenue", evidence: "Conversion & Revenue Intelligence" });
+    }
+    note("Conversion & Revenue", true);
+  } else note("Conversion & Revenue", false, failText(attribution.reason));
 
   // ── Normalise → dedupe → merge ──
   const stateMap = states.status === "fulfilled" ? states.value : new Map<string, { status: RecStatus; note: string | null; updatedAt: string }>();

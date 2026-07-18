@@ -10,6 +10,7 @@ const TABS = [
   { href: "/google-ads/ad-copy", label: "Ad Copy" },
   { href: "/google-ads/competitors", label: "Competitors" },
   { href: "/google-ads/conversion", label: "Conversion" },
+  { href: "/google-ads/attribution", label: "Attribution & Revenue" },
   { href: "/google-ads/governance", label: "Governance" },
   { href: "/google-ads/planner", label: "Planner" },
   { href: "/google-ads/calendar", label: "Campaign Calendar" },
