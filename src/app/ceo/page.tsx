@@ -272,6 +272,20 @@ export default async function CeoDashboardPage() {
         />
       )}
 
+      {/* Department 10 — entry point to the Recommendation Intelligence Center.
+          Counts are NOT computed here; the center owns them. */}
+      <Section title="Recommendation Intelligence">
+        <a href="/ceo/recommendations" className="card block transition-colors hover:border-brand/40">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-text">Executive decision center</div>
+              <div className="text-xs text-muted">Unified recommendations from every AI department — prioritised, deduplicated and owner-governed.</div>
+            </div>
+            <span className="shrink-0 text-xs text-brand">Open →</span>
+          </div>
+        </a>
+      </Section>
+
       {d.dbConnected && (
         <>
           <Section title="Today's Activity">
