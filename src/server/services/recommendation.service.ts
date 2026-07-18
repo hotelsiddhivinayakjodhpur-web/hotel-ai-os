@@ -15,6 +15,16 @@ import {
 } from "./google-ads.service";
 import { getConversionIntelligence } from "./conversion.service";
 import { listRecommendationStates } from "@/server/repositories/recommendation.repository";
+// Single canonical source for the recommendation vocabulary + shapes.
+import {
+  REC_PRIORITIES,
+  REC_CATEGORIES,
+  type RecPriority,
+  type RecCategory,
+  type RecStatus,
+  type UnifiedRecommendation,
+  type RecommendationEngine,
+} from "@/lib/recommendation-types";
 
 /**
  * Enterprise Recommendation Engine — the SHARED intelligence layer (Department 8).
@@ -38,66 +48,17 @@ import { listRecommendationStates } from "@/server/repositories/recommendation.r
  * department has no data, it contributes nothing rather than a guess.
  */
 
-export type RecPriority = "critical" | "high" | "medium" | "low";
-
-export type RecCategory =
-  | "SEO" | "Google Ads" | "Website" | "Performance" | "Booking" | "Revenue"
-  | "Content" | "Google Business" | "Technical" | "Security" | "Analytics" | "AI";
-
-export type RecStatus = "waiting" | "approved" | "in_progress" | "completed" | "dismissed";
-
-export const REC_STATUSES: { id: RecStatus; label: string }[] = [
-  { id: "waiting", label: "Waiting" },
-  { id: "approved", label: "Approved" },
-  { id: "in_progress", label: "In Progress" },
-  { id: "completed", label: "Completed" },
-  { id: "dismissed", label: "Dismissed" },
-];
-
-export const REC_PRIORITIES: RecPriority[] = ["critical", "high", "medium", "low"];
-
-export const REC_CATEGORIES: RecCategory[] = [
-  "SEO", "Google Ads", "Website", "Performance", "Booking", "Revenue",
-  "Content", "Google Business", "Technical", "Security", "Analytics", "AI",
-];
-
-/** One normalised recommendation, merged across every department that raised it. */
-export interface UnifiedRecommendation {
-  /** Stable fingerprint — survives re-computation, so status can persist. */
-  id: string;
-  title: string;
-  detail: string;
-  /** Every department that independently raised this (dedup keeps them all). */
-  sources: string[];
-  department: string; // primary source (first raiser)
-  category: RecCategory;
-  priority: RecPriority;
-  evidence: string;
-  suggestedFix: string;
-  status: RecStatus;
-  statusNote: string | null;
-  statusUpdatedAt: string | null;
-  /** How many departments independently flagged this (dedup strength). */
-  corroboration: number;
-}
-
-export interface RecommendationEngine {
-  recommendations: UnifiedRecommendation[];
-  totals: {
-    total: number;
-    open: number; // waiting + approved + in_progress
-    critical: number;
-    high: number;
-    completed: number;
-    dismissed: number;
-  };
-  byDepartment: { department: string; count: number }[];
-  byPriority: { priority: RecPriority; count: number }[];
-  byCategory: { category: RecCategory; count: number }[];
-  sourcesReporting: string[];
-  sourcesUnavailable: { department: string; reason: string }[];
-  generatedAt: string;
-}
+// Canonical vocabulary + shapes live in lib/recommendation-types (client-safe).
+// Re-exported here so existing consumers can import from either path while there
+// remains exactly ONE definition of each symbol.
+export type {
+  RecPriority,
+  RecCategory,
+  RecStatus,
+  UnifiedRecommendation,
+  RecommendationEngine,
+} from "@/lib/recommendation-types";
+export { REC_STATUSES, REC_PRIORITIES, REC_CATEGORIES } from "@/lib/recommendation-types";
 
 /** Raw contribution from a department before normalisation. */
 interface RawRec {

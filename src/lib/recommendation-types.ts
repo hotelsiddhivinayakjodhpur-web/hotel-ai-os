@@ -30,9 +30,6 @@ export const REC_CATEGORIES: RecCategory[] = [
   "Content", "Google Business", "Technical", "Security", "Analytics", "AI",
 ];
 
-/** Statuses that count as still-open work. */
-export const OPEN_STATUSES: RecStatus[] = ["waiting", "approved", "in_progress"];
-
 /** One normalised recommendation, merged across every department that raised it. */
 export interface UnifiedRecommendation {
   /** Stable fingerprint — survives re-computation, so status can persist. */

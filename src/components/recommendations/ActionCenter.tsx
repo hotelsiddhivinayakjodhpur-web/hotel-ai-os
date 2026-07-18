@@ -2,8 +2,13 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { setRecommendationStatusAction } from "@/app/recommendations/actions";
-import type { RecommendationEngine, RecPriority, RecStatus, UnifiedRecommendation } from "@/lib/recommendation-types";
-import { REC_STATUSES } from "@/lib/recommendation-types";
+import {
+  REC_STATUSES,
+  type RecommendationEngine,
+  type RecPriority,
+  type RecStatus,
+  type UnifiedRecommendation,
+} from "@/lib/recommendation-types";
 import { Card, Pill } from "@/components/ui/primitives";
 
 /**
