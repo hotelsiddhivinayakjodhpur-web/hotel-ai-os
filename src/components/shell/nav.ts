@@ -24,6 +24,7 @@ export const NAV: NavItem[] = [
   { href: "/marketing", label: "Marketing Ops", icon: "◬", description: "Plan, prepare & approve everything" },
   { href: "/social", label: "Social Execution", icon: "➤", description: "Publish, schedule & track social" },
   { href: "/media", label: "Media AI", icon: "▤", description: "Smart media library & suggestions" },
+  { href: "/recommendations", label: "Recommendations", icon: "✦", description: "Shared intelligence & action center" },
   { href: "/monitoring", label: "Monitoring AI", icon: "◍", description: "Health, alerts & error log" },
   { href: "/settings", label: "Settings", icon: "⚙", description: "Connections & credentials" },
 ];

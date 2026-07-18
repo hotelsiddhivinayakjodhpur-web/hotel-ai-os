@@ -600,3 +600,33 @@ model BookingImportLog {
   error      String?
   createdAt  DateTime @default(now())
 }
+
+/// Owner decision on one aggregated recommendation (Department 8).
+/// Recommendations themselves are computed live and never stored — only the
+/// lifecycle decision is persisted, keyed by the engine's stable fingerprint.
+model RecommendationState {
+  id          String   @id @default(cuid())
+  fingerprint String   @unique // engine fingerprint (category + normalised title)
+  title       String // snapshot for readability in audits
+  department  String
+  status      String   @default("waiting") // waiting|approved|in_progress|completed|dismissed
+  note        String?
+  actor       String   @default("owner")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+}
+
+/// Immutable audit trail of every recommendation status transition.
+model RecommendationAudit {
+  id          String   @id @default(cuid())
+  fingerprint String
+  fromStatus  String?
+  toStatus    String
+  note        String?
+  actor       String   @default("owner")
+  at          DateTime @default(now())
+
+  @@index([fingerprint, at])
+}

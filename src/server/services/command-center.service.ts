@@ -7,6 +7,7 @@ import { getGoogleAdsOverview } from "./google-ads.service";
 import { getMetaAdsOverview } from "./meta-ads.service";
 import { getContentDashboard, type ContentDashboard } from "./content.service";
 import { getConnections } from "@/server/connections/connections.service";
+import { getRecommendationEngine } from "./recommendation.service";
 
 /**
  * CEO Command Center 2.0 — the composition layer for the HOME page.
@@ -57,7 +58,7 @@ export interface CommandCenter {
 }
 
 export async function getCommandCenter(): Promise<CommandCenter> {
-  const [executive, gbp, ig, fb, yt, gads, mads, content, connections] = await Promise.all([
+  const [executive, gbp, ig, fb, yt, gads, mads, content, connections, engine] = await Promise.all([
     getExecutiveView(),
     getGbpOverview(),
     getInstagramOverview(),
@@ -67,6 +68,7 @@ export async function getCommandCenter(): Promise<CommandCenter> {
     getMetaAdsOverview(),
     getContentDashboard(),
     getConnections(),
+    getRecommendationEngine(),
   ]);
 
   // ── Connection health (reuses the Settings registry statuses) ──
@@ -145,22 +147,30 @@ export async function getCommandCenter(): Promise<CommandCenter> {
     { id: "meta-ads", name: "Meta Ads AI", href: "/meta-ads", status: mads.campaigns.status === "LIVE" ? "LIVE" : "PARTIAL", note: mads.campaigns.status === "LIVE" ? "Data live (read-only)" : "Planner live · data waiting" },
   ];
 
-  // ── Recommendations (collected from every department; no new engines) ──
-  const recommendations: CommandRecommendation[] = [
-    ...executive.recommendations.map((r) => ({ priority: r.priority, department: r.area, title: r.title, detail: r.detail })),
-    ...ig.recommendations.map((r) => ({ ...r, department: "Instagram" })),
-    ...fb.recommendations.map((r) => ({ ...r, department: "Facebook" })),
-    ...yt.recommendations.map((r) => ({ ...r, department: "YouTube" })),
-    ...gads.recommendations.map((r) => ({ ...r, department: "Google Ads" })),
-    ...mads.recommendations.map((r) => ({ ...r, department: "Meta Ads" })),
-  ];
-  // GBP: derive from its real overview data (it exposes data, not recs).
-  if (gbp.reviews.status === "LIVE" && gbp.reviews.data && gbp.reviews.data.unreplied > 0) {
-    recommendations.push({ priority: "high", department: "Google Business", title: `${gbp.reviews.data.unreplied} unreplied review(s)`, detail: "Use the Review Reply Generator and respond today." });
-  }
-  const rank = { high: 0, medium: 1, low: 2 } as const;
-  recommendations.sort((a, b) => rank[a.priority] - rank[b.priority]);
-  const priorities = recommendations.filter((r) => r.priority === "high").slice(0, 6);
+  // ── Recommendations — DELEGATED to the shared Recommendation Engine ──
+  // This used to inline its own aggregation. That logic now lives in exactly one
+  // place (recommendation.service), which also covers the five Google Ads
+  // intelligence departments this list previously missed, deduplicates across
+  // departments, and applies the owner's lifecycle status. Dismissed/completed
+  // items are filtered out so the CEO view shows only what is still open.
+  const openStatuses = new Set(["waiting", "approved", "in_progress"]);
+  const recommendations: CommandRecommendation[] = engine.recommendations
+    .filter((r) => openStatuses.has(r.status))
+    .map((r) => ({
+      priority: r.priority === "critical" ? "high" : r.priority,
+      department: r.sources.join(" + "),
+      title: r.title,
+      detail: r.detail,
+    }));
+  const priorities = engine.recommendations
+    .filter((r) => openStatuses.has(r.status) && (r.priority === "critical" || r.priority === "high"))
+    .slice(0, 6)
+    .map((r) => ({
+      priority: "high" as const,
+      department: r.sources.join(" + "),
+      title: r.title,
+      detail: r.detail,
+    }));
 
   // ── CEO Score (blend of existing scores; no new math on raw data) ──
   const revenueHealth = executive.hotelKpis?.healthScore ?? null;
