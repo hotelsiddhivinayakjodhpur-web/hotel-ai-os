@@ -15,7 +15,10 @@
     "prisma:deploy": "prisma migrate deploy",
     "stayflexi:verify": "tsx scripts/verify-stayflexi.ts",
     "google:verify": "tsx scripts/verify-google.ts",
-    "ga4:verify": "tsx scripts/verify-ga4.ts"
+    "ga4:verify": "tsx scripts/verify-ga4.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
@@ -28,6 +31,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.4",
     "eslint-config-next": "^15.5.19",
@@ -35,6 +39,7 @@
     "prisma": "^6.2.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
   }
 }

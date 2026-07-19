@@ -97,8 +97,13 @@ export interface AdCopyInput {
 // guidance lives in `notes`/promotion lines, which are not length-limited.
 const THEME_SEEDS: Record<AdCopyTheme, { headlines: string[]; descriptions: string[]; callouts: string[]; path2: string }> = {
   generic: {
-    headlines: ["Book Direct & Save", `Comfortable ${HOTEL.city} Stay`, `Near ${HOTEL.city} Attractions`, "Warm Rajasthani Welcome"],
-    descriptions: [`Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`],
+    // Kept DISTINCT from BASE_HEADLINES — overlapping seeds get deduplicated,
+    // which silently starved this theme to 9 headlines (caught by the test suite).
+    headlines: [`Near ${HOTEL.city} Attractions`, "Official Website Booking", `Your ${HOTEL.city} Base`, "Direct Rates, No Fees", "Stay Near the Fort"],
+    descriptions: [
+      `Easy base for Mehrangarh Fort & the Blue City. Book direct on our official website.`,
+      `Comfortable rooms and warm Rajasthani hospitality in the heart of ${HOTEL.city}.`,
+    ],
     callouts: ["Book Direct for Best Rate", "Warm Rajasthani Welcome", "Heart of the Blue City", "Near Top Attractions"],
     path2: "direct",
   },

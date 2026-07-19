@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { withRetry } from "@/lib/retry";
+import { governed } from "./api-governance";
 
 /**
  * Official Google Ads API client (REST, GAQL search) — read-only.
@@ -98,7 +98,11 @@ export async function adsSearch(query: string, customerId?: string): Promise<Ads
   const cid = (customerId ?? env.GOOGLE_ADS_CUSTOMER_ID!).replace(/-/g, "");
   const label = query.trim().slice(0, 40);
 
-  return (await withRetry(
+  // Runs under the shared API Governance layer: daily quota accounting, token-
+  // bucket rate limiting, circuit breaker and retry/backoff — identical policy
+  // to every other integration in the OS.
+  return (await governed(
+    "google-ads",
     async () => {
       let token = await getAdsAccessToken();
       const doFetch = (t: string) =>
@@ -131,8 +135,8 @@ export async function adsSearch(query: string, customerId?: string): Promise<Ads
       return data.results ?? [];
     },
     {
-      label: "google-ads-search",
-      shouldRetry: (e) => (e instanceof AdsApiError ? e.status === 429 || e.status >= 500 : true),
+      label,
+      shouldRetry: (e) => (e instanceof AdsApiError ? e.status === 429 || e.status >= 500 : false),
     },
   )) as AdsSearchRow[];
 }
