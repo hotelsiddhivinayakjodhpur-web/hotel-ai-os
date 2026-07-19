@@ -1,3 +1,4 @@
+import { isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { cached, TTL, getCacheStats } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
@@ -203,7 +204,7 @@ async function buildReport(): Promise<MonitoringReport> {
       label: "Meta token (FB + IG + Ads)",
       status: metaToken?.data?.is_valid ? (missingMeta.length === 0 ? "HEALTHY" : "WARNING") : metaToken === null ? "UNKNOWN" : "CRITICAL",
       value: metaToken?.data?.is_valid
-        ? `Valid · ${metaScopes.length} scopes · expires ${metaToken.data.expires_at ? new Date(metaToken.data.expires_at * 1000).toISOString().slice(0, 10) : "never"}${missingMeta.length ? ` · missing: ${missingMeta.join(", ")}` : ""}`
+        ? `Valid · ${metaScopes.length} scopes · expires ${metaToken.data.expires_at ? isoDateIn(timeZoneFor("hotel"), new Date(metaToken.data.expires_at * 1000)) : "never"}${missingMeta.length ? ` · missing: ${missingMeta.join(", ")}` : ""}`
         : metaToken === null
           ? "debug_token unreachable right now."
           : "Token INVALID — re-mint required.",

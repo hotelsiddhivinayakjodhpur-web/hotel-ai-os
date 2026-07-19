@@ -1,3 +1,4 @@
+import { addDays, isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { gscSearchAnalytics, gscStatus } from "@/server/integrations/gsc-client";
 import { ga4DateToIso } from "@/lib/format";
 import { cached, TTL } from "@/lib/cache";
@@ -37,15 +38,14 @@ export interface SeoIntelligence {
   ctrAnalysis: { avgCtr: number | null; bestQuery: string | null; worstCtrHighImpression: string | null };
 }
 
+/** Days-ago on the ANALYTICS clock (Search Console reports in property time). */
 function isoDaysAgo(days: number, today: Date): string {
-  const d = new Date(today);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  return addDays(isoDateIn(timeZoneFor("analytics"), today), -days);
 }
 
 export async function getSeoTrends(days = 28, today: Date = new Date()): Promise<SeoTrendPoint[]> {
   if (!gscStatus().ready) return [];
-  const to = today.toISOString().slice(0, 10);
+  const to = isoDateIn(timeZoneFor("analytics"), today);
   const from = isoDaysAgo(days, today);
   return cached(`gsc:trends:${days}:${to}`, TTL.medium, () => fetchSeoTrends(from, to));
 }

@@ -1,3 +1,4 @@
+import { isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { contentRepository } from "@/server/repositories/content.repository";
 import { dbConfigured, safeDb } from "./db-guard";
 
@@ -131,7 +132,8 @@ export async function getContentCalendar(days = 45): Promise<{ date: string; ite
   const rows = await safeDb(() => contentRepository.scheduled(now, to), []);
   const byDate = new Map<string, ContentItemView[]>();
   for (const r of rows) {
-    const key = r.scheduledFor!.toISOString().slice(0, 10);
+    // Group by the HOTEL day: a 00:30 IST slot belongs to that Indian date.
+    const key = isoDateIn(timeZoneFor("hotel"), r.scheduledFor!);
     const arr = byDate.get(key) ?? [];
     arr.push(toView(r));
     byDate.set(key, arr);

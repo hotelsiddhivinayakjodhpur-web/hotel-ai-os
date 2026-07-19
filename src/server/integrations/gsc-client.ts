@@ -1,3 +1,4 @@
+import { governed } from "./api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { GOOGLE_SCOPES, getAccessToken, isConfigured } from "./google-auth";
@@ -45,6 +46,9 @@ export async function gscSearchAnalytics(q: GscSearchQuery): Promise<GscSearchRo
 
   const token = await getAccessToken(GOOGLE_SCOPES.searchConsole);
   const endpoint = `https://searchconsole.googleapis.com/webmasters/v3/sites/${siteResource()}/searchAnalytics/query`;
+
+  // Shared API Governance (GSC has a comparatively low daily quota).
+  return governed("search-console", async () => {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -63,6 +67,7 @@ export async function gscSearchAnalytics(q: GscSearchQuery): Promise<GscSearchRo
   }
   const data = (await res.json()) as { rows?: GscSearchRow[] };
   return data.rows ?? [];
+  }, { label: "gsc:searchAnalytics" });
 }
 
 export interface GscSitemap {
@@ -81,6 +86,8 @@ export async function gscListSitemaps(): Promise<GscSitemap[]> {
 
   const token = await getAccessToken(GOOGLE_SCOPES.searchConsole);
   const endpoint = `https://searchconsole.googleapis.com/webmasters/v3/sites/${siteResource()}/sitemaps`;
+
+  return governed("search-console", async () => {
   const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     const body = await res.text();
@@ -89,4 +96,5 @@ export async function gscListSitemaps(): Promise<GscSitemap[]> {
   }
   const data = (await res.json()) as { sitemap?: GscSitemap[] };
   return data.sitemap ?? [];
+  }, { label: "gsc:sitemaps" });
 }

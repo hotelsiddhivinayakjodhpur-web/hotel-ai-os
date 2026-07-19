@@ -1,3 +1,4 @@
+import { addDays, isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import { cached, TTL } from "@/lib/cache";
@@ -56,10 +57,9 @@ export interface SeoReport {
   note?: string;
 }
 
+/** Days-ago on the ANALYTICS clock (Search Console reports in property time). */
 function isoDaysAgo(days: number, today: Date): string {
-  const d = new Date(today);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  return addDays(isoDateIn(timeZoneFor("analytics"), today), -days);
 }
 
 function toRow(r: GscSearchRow): SeoRow {
@@ -104,7 +104,7 @@ function mapSitemap(s: GscSitemap): SitemapStatus {
 
 /** Full SEO dashboard payload over the last `days` (default 28). */
 export async function getSeoReport(days = 28, today: Date = new Date()): Promise<SeoReport> {
-  const to = today.toISOString().slice(0, 10);
+  const to = isoDateIn(timeZoneFor("analytics"), today);
   const from = isoDaysAgo(days, today);
 
   const status = gscStatus();

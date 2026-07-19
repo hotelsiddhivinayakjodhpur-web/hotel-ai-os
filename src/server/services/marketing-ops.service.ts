@@ -1,3 +1,4 @@
+import { partsIn, timeZoneFor, today } from "@/lib/time-engine";
 import { cached, TTL } from "@/lib/cache";
 import { getCommandCenter } from "./command-center.service";
 import { getGoogleAdsOverview } from "./google-ads.service";
@@ -232,7 +233,9 @@ async function buildOps(): Promise<MarketingOps> {
     const byHour = new Map<number, { n: number; eng: number }>();
     for (const p of posts) {
       if (!p.postedAt) continue;
-      const h = new Date(p.postedAt).getUTCHours();
+      // Posting hour in the HOTEL timezone: a UTC hour is 5.5h off for an
+      // Indian audience, which would recommend the wrong posting slot.
+      const h = partsIn(timeZoneFor("hotel"), new Date(p.postedAt)).hour;
       const cur = byHour.get(h) ?? { n: 0, eng: 0 };
       cur.n += 1;
       cur.eng += p.likes + p.comments;
@@ -357,7 +360,7 @@ async function buildOps(): Promise<MarketingOps> {
   const wkYtViews = last7(yt.daily.data?.series).reduce((s, p) => s + p.views, 0);
   const wkContent = allContent.filter((i) => Date.now() - new Date(i.createdAt).getTime() < 7 * 86_400_000).length;
   const weekly: WeeklyReport = {
-    heading: `Weekly CEO Marketing Report — 7 days to ${new Date().toISOString().slice(0, 10)}`,
+    heading: `Weekly CEO Marketing Report — 7 days to ${today("hotel")}`,
     lines: [
       `Website: ${wkSessions} sessions this week (GA4 daily series).`,
       `Social: IG reach ${wkIgReach} · FB engagements ${wkFbEng} · YT views ${wkYtViews} (7-day sums of the real daily series).`,

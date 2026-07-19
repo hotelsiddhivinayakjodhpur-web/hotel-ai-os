@@ -1,3 +1,4 @@
+import { addDays, isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { bookingRepository } from "@/server/repositories/booking.repository";
 import { metricRepository } from "@/server/repositories/metric.repository";
 import { safeDb } from "./db-guard";
@@ -34,11 +35,16 @@ export interface KpiSet {
 
 const DIRECT_SOURCES = new Set(["STAYFLEXI_OD", "CUSTOM_BE", "DIRECT", "WEBSITE"]);
 
-function dayBounds(date: Date): { start: Date; end: Date } {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
+/**
+ * Day bounds on the HOTEL clock via the Time Engine. A booking made at 00:30
+ * IST belongs to that Indian day; UTC bounds would file it under the previous
+ * day and mis-attribute every late-night booking.
+ */
+function dayBounds(date: Date): { start: Date; end: Date; day: string } {
+  const day = isoDateIn(timeZoneFor("hotel"), date);
+  const start = new Date(`${day}T00:00:00Z`);
+  const end = new Date(`${addDays(day, 1)}T00:00:00Z`);
+  return { start, end, day };
 }
 
 function isDirect(source: string | null): boolean {
@@ -81,8 +87,7 @@ export async function computeDailyKpis(
     roomsAvailable && roomsAvailable > 0 ? totalRevenue / roomsAvailable : null;
 
   // Booking pace vs the prior 24h window.
-  const prevStart = new Date(start);
-  prevStart.setUTCDate(prevStart.getUTCDate() - 1);
+  const prevStart = new Date(`${addDays(isoDateIn(timeZoneFor("hotel"), start), -1)}T00:00:00Z`);
   const prevCreated = await safeDb(
     () => bookingRepository.createdBetween(hotelId, prevStart, start),
     [],
@@ -93,7 +98,7 @@ export async function computeDailyKpis(
   const hasData = stays.length > 0 || created.length > 0;
 
   return {
-    date: start.toISOString().slice(0, 10),
+    date: isoDateIn(timeZoneFor("hotel"), start),
     occupancy,
     adr,
     revpar,

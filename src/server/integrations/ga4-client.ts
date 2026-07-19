@@ -1,3 +1,4 @@
+import { governed } from "./api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { GOOGLE_SCOPES, getAccessToken, isConfigured } from "./google-auth";
@@ -56,6 +57,10 @@ export async function ga4RunReport(req: Ga4RunReportRequest): Promise<Ga4RunRepo
 
   const token = await getAccessToken(GOOGLE_SCOPES.analytics);
   const endpoint = `https://analyticsdata.googleapis.com/v1beta/properties/${env.GA4_PROPERTY_ID}:runReport`;
+
+  // Shared API Governance: quota accounting, rate limiting, circuit breaker and
+  // retry/backoff — the same policy every integration in the OS runs under.
+  return governed("ga4", async () => {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -75,4 +80,5 @@ export async function ga4RunReport(req: Ga4RunReportRequest): Promise<Ga4RunRepo
     throw new Error(`GA4 runReport failed (${res.status}): ${body.slice(0, 300)}`);
   }
   return (await res.json()) as Ga4RunReportResponse;
+  }, { label: "ga4:runReport" });
 }

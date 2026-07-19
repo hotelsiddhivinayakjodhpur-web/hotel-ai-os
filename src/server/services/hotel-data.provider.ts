@@ -1,3 +1,4 @@
+import { addDays as addDaysIso, isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { reportRepository } from "@/server/repositories/report.repository";
 import { hotelId } from "@/server/gmail/hotel";
 import { safeDb } from "./db-guard";
@@ -35,7 +36,7 @@ function naToKpi(na: NightAuditReport, prior?: NightAuditReport | null): KpiSet 
   const healthScore = computeHealth(na.occupancy, bookingPace);
 
   return {
-    date: na.businessDate.toISOString().slice(0, 10),
+    date: isoDateIn(timeZoneFor("hotel"), na.businessDate),
     occupancy: na.occupancy,
     adr: na.adr,
     revpar: na.revpar,
@@ -126,10 +127,9 @@ export const gmailDataProvider: HotelDataProvider = {
   },
 };
 
+/** Day shift via the shared Time Engine (hotel clock). */
 function addDays(d: Date, days: number): Date {
-  const out = new Date(d);
-  out.setUTCDate(out.getUTCDate() + days);
-  return out;
+  return new Date(`${addDaysIso(isoDateIn(timeZoneFor("hotel"), d), days)}T00:00:00Z`);
 }
 
 /**

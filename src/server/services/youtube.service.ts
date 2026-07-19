@@ -1,3 +1,4 @@
+import { isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { cached, TTL } from "@/lib/cache";
 import { ytFormatOf } from "@/lib/youtube-adapters";
 import {
@@ -102,8 +103,9 @@ function failReason(e: unknown): string {
   return e instanceof YouTubeApiError ? e.reason : e instanceof Error ? e.message : String(e);
 }
 
+/** Day label on the HOTEL clock (YouTube analytics windows are day-granular). */
 function isoDay(msOffset = 0): string {
-  return new Date(Date.now() + msOffset).toISOString().slice(0, 10);
+  return isoDateIn(timeZoneFor("hotel"), new Date(Date.now() + msOffset));
 }
 
 // ── Official API wrappers (OAuth only — youtube-client) ────────────────────

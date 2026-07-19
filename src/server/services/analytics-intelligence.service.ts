@@ -1,3 +1,4 @@
+import { addDays, partsIn, timeZoneFor } from "@/lib/time-engine";
 import { ga4DateToIso } from "@/lib/format";
 import { getAnalyticsReport, lastNDays, type AnalyticsReport } from "./analytics.service";
 
@@ -30,12 +31,11 @@ export interface AnalyticsIntelligence {
   executiveSummary: string;
 }
 
+/** Monday-start week label, via the shared Time Engine (ISO-8601 weeks). */
 function isoWeekKey(iso: string): string {
-  const d = new Date(iso);
-  // Monday-start week label.
-  const day = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - day);
-  return d.toISOString().slice(0, 10);
+  const parts = partsIn(timeZoneFor("analytics"), new Date(`${iso}T12:00:00Z`));
+  const backToMonday = (parts.weekday + 6) % 7;
+  return addDays(iso, -backToMonday);
 }
 
 function rollup(

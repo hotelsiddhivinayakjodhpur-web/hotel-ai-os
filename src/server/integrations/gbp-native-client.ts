@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { cached, TTL } from "@/lib/cache";
-import { withRetry } from "@/lib/retry";
+import { governed } from "./api-governance";
 
 /**
  * Official Google Business Profile client — STAGED, not yet wired to any page.
@@ -75,7 +75,9 @@ async function accessToken(nowMs = Date.now()): Promise<string> {
 const retryable = (e: unknown) => (e instanceof GbpApiError ? e.status === 429 || e.status >= 500 : true);
 
 async function apiGet<T>(url: string, label: string): Promise<T> {
-  return (await withRetry(
+  // Shared API Governance (GBP has a tight daily quota and slow recovery).
+  return (await governed(
+    "gbp",
     async () => {
       const token = await accessToken();
       const started = Date.now();
@@ -89,7 +91,7 @@ async function apiGet<T>(url: string, label: string): Promise<T> {
       log.info("gbp_api", { label, status: res.status, ms });
       return res.json();
     },
-    { label: `gbp-${label}`, shouldRetry: retryable },
+    { label: `gbp:${label}`, shouldRetry: retryable },
   )) as T;
 }
 

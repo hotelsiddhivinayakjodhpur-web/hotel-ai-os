@@ -1,3 +1,4 @@
+import { today } from "@/lib/time-engine";
 import { cached, TTL } from "@/lib/cache";
 import { getMarketingOps } from "./marketing-ops.service";
 import { getContentDashboard } from "./content.service";
@@ -125,7 +126,7 @@ async function build(): Promise<ContentOps> {
 
   // ── CEO Content Report ──
   const ceoReport = {
-    heading: `Content Operations — ${new Date().toISOString().slice(0, 10)}`,
+    heading: `Content Operations — ${today("hotel")}`,
     lines: [
       `Overall content score ${overallContentScore ?? "—"}/100 · maturity ${maturityOverall}%.`,
       `${totalItems} item(s) produced · ${content.totals.used} published · ${content.totals.drafts} awaiting approval.`,

@@ -1,5 +1,7 @@
 import { cached, TTL } from "@/lib/cache";
 import { logger } from "@/lib/logger";
+// Enterprise Time Engine — all date/window maths run on the ADS account clock.
+import { monthToDate, monthWindow, previousWindow, rolling } from "@/lib/time-engine";
 import { prisma } from "@/lib/prisma";
 import {
   adsConfigured,
@@ -182,9 +184,15 @@ interface GaqlCampaignRow {
   };
 }
 
-/** Days covered by a date preset — used to turn a daily budget into a period cap. */
+/**
+ * Days covered by a date preset — used to turn a daily budget into a period cap.
+ *
+ * Resolved through the Enterprise Time Engine on the ADS clock. Previously this
+ * used UTC, which is 5.5h out of step with the account's reporting timezone: for
+ * THIS_MONTH it returned the wrong elapsed-day count for 5.5 hours every day,
+ * skewing every budget-utilisation figure derived from it.
+ */
 function presetDays(preset: AdsDatePreset): number {
-  const now = new Date();
   switch (preset) {
     case "TODAY":
     case "YESTERDAY":
@@ -194,9 +202,12 @@ function presetDays(preset: AdsDatePreset): number {
     case "LAST_30_DAYS":
       return 30;
     case "THIS_MONTH":
-      return now.getUTCDate();
-    case "LAST_MONTH":
-      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).getUTCDate();
+      // Complete days elapsed in the account's month, not the UTC day-of-month.
+      return Math.max(1, monthToDate("ads").elapsedDays);
+    case "LAST_MONTH": {
+      const m = monthWindow("ads");
+      return previousWindow({ ...m, days: m.days }).days;
+    }
     default:
       return 30;
   }
@@ -840,13 +851,15 @@ async function buildBudgetOptimization(preset: AdsDatePreset): Promise<BudgetOpt
   const estMonthlyBudget = totalDailyBudget * 30.4;
   const sharedBudgetCount = new Set(activeBudgets.filter((b) => b.explicitlyShared).map((b) => b.budgetId)).size;
 
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const monthStart = new Date(Date.UTC(year, month, 1));
-  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const daysElapsed = now.getUTCDate();
-  const daysRemainingInMonth = daysInMonth - daysElapsed;
+  // Month maths on the ADS clock via the Time Engine. `elapsedDays` counts only
+  // COMPLETE days — using the calendar day-of-month would include today (still
+  // in progress) and understate the daily run rate, skewing the projection.
+  const mtd = monthToDate("ads");
+  const month = monthWindow("ads");
+  const daysInMonth = month.days;
+  const daysElapsed = mtd.elapsedDays;
+  const daysRemainingInMonth = mtd.remainingDays;
+  const monthStart = new Date(`${mtd.start}T00:00:00Z`);
 
   const mtdSpend = history.filter((h) => h.date >= monthStart).reduce((s, h) => s + h.cost, 0);
   const projectedMonthSpend = daysElapsed > 0 && mtdSpend > 0 ? (mtdSpend / daysElapsed) * daysInMonth : null;
@@ -1080,16 +1093,12 @@ async function getKeywordShareMetrics(preset: AdsDatePreset): Promise<Map<string
 function priorWindowClause(preset: AdsDatePreset): string | null {
   if (preset !== "LAST_7_DAYS" && preset !== "LAST_30_DAYS") return null;
   const days = preset === "LAST_7_DAYS" ? 7 : 30;
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const curEnd = new Date();
-  curEnd.setUTCDate(curEnd.getUTCDate() - 1); // presets end yesterday
-  const curStart = new Date(curEnd);
-  curStart.setUTCDate(curEnd.getUTCDate() - (days - 1));
-  const priorEnd = new Date(curStart);
-  priorEnd.setUTCDate(curStart.getUTCDate() - 1);
-  const priorStart = new Date(priorEnd);
-  priorStart.setUTCDate(priorEnd.getUTCDate() - (days - 1));
-  return `segments.date BETWEEN '${iso(priorStart)}' AND '${iso(priorEnd)}'`;
+  // Time Engine on the ADS clock: `rolling()` ends on the last COMPLETE day
+  // (matching Google's LAST_N_DAYS semantics) and `previousWindow()` is exactly
+  // equal-length and adjacent — so the comparison can never overlap or drift.
+  // The old UTC arithmetic shifted both boundaries by 5.5h against the account.
+  const prior = previousWindow(rolling(days, "ads"));
+  return `segments.date BETWEEN '${prior.start}' AND '${prior.end}'`;
 }
 
 /** Per-keyword health (0-100) + evidence, from real metrics vs account CPA. */

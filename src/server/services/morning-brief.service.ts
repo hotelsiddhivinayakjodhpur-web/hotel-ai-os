@@ -1,3 +1,4 @@
+import { isoDateIn, timeZoneFor } from "@/lib/time-engine";
 import { cached, TTL } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { getCommandCenter } from "./command-center.service";
@@ -137,7 +138,7 @@ async function buildBrief(): Promise<MorningBrief> {
 
   // ── System health ──
   const tokenScopes = tokenRes?.data?.scopes?.length ?? 0;
-  const tokenExpiry = tokenRes?.data ? (tokenRes.data.expires_at ? new Date(tokenRes.data.expires_at * 1000).toISOString().slice(0, 10) : "never") : null;
+  const tokenExpiry = tokenRes?.data ? (tokenRes.data.expires_at ? isoDateIn(timeZoneFor("hotel"), new Date(tokenRes.data.expires_at * 1000)) : "never") : null;
   const cronOk = gmail?.lastSync?.trigger === "cron" && gmail?.lastSync?.status === "SUCCESS";
   const systemHealth: BriefLine[] = [
     { label: "Database (Supabase)", value: kpis || cc.content.dbAvailable ? "Healthy" : "Unreachable", tone: kpis || cc.content.dbAvailable ? "ok" : "crit" },
