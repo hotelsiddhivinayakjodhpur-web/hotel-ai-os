@@ -1,3 +1,4 @@
+import { governed } from "./api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
@@ -56,7 +57,8 @@ export async function getCoreWebVitals(
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
-    const res = await fetch(endpoint, { signal: controller.signal });
+    // Shared API Governance (anonymous PSI quota is very small).
+    const res = await governed("pagespeed", () => fetch(endpoint, { signal: controller.signal }), { label: "psi:runPagespeed" });
     clearTimeout(timer);
 
     if (!res.ok) {

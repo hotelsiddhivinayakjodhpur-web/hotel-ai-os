@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger";
 import { businessDay } from "@/lib/time-engine";
+import { incrementCounter, readCounter } from "@/lib/cache";
 
 /**
  * Enterprise API Governance — one control plane for every external API the
@@ -195,6 +196,7 @@ export async function governed<T>(provider: ApiProvider, fn: () => Promise<T>, o
     try {
       const result = await fn();
       s.successes++;
+      recordGlobalOperation(provider, s.day, cost);
       s.consecutiveFailures = 0;
       if (s.circuit === "half-open") {
         s.circuit = "closed";
@@ -270,4 +272,56 @@ export function allProviderHealth(): ProviderHealth[] {
 /** Governance limits, for documentation and settings surfaces. */
 export function providerLimits(): { provider: ApiProvider; limit: ProviderLimit }[] {
   return (Object.keys(PROVIDER_LIMITS) as ApiProvider[]).map((p) => ({ provider: p, limit: PROVIDER_LIMITS[p] }));
+}
+
+// ── Global quota ledger (optional, via the shared L2 cache) ────────────────
+//
+// Instance-local counters are a safety rail, not a ledger: on serverless, N
+// lambdas each count their own operations, so the true account-wide total is the
+// SUM across instances. When the distributed cache is provisioned we publish
+// each instance's daily count under a per-instance key and read the fleet total,
+// giving genuine account-wide quota accounting. Without L2 this degrades to the
+// local count and says so — it never blocks a request on missing infrastructure.
+
+/** Fleet-wide quota usage for one provider. */
+export interface GlobalQuota {
+  provider: ApiProvider;
+  localOperations: number;
+  globalOperations: number | null; // null = no shared cache, cannot know fleet total
+  dailyLimit: number | null;
+  globalUsedPct: number | null;
+  shared: boolean;
+  businessDay: string;
+}
+
+/** Shared ledger key: ONE key per provider per business day, incremented by
+ * every instance, so the value is a genuine fleet-wide total. */
+function ledgerKey(provider: ApiProvider, day: string): string {
+  return `quota:${provider}:${day}`;
+}
+
+/** Record one operation against the fleet-wide tally (fire-and-forget). */
+function recordGlobalOperation(provider: ApiProvider, day: string, cost: number): void {
+  void incrementCounter(ledgerKey(provider, day), cost);
+}
+
+/**
+ * Fleet-wide quota usage. Reads the shared counter that every instance
+ * increments; when no distributed cache is configured this reports the local
+ * count and flags `shared: false` rather than presenting it as a fleet total.
+ */
+export async function globalQuota(provider: ApiProvider): Promise<GlobalQuota> {
+  const s = stateFor(provider);
+  const limit = PROVIDER_LIMITS[provider];
+  const global = await readCounter(ledgerKey(provider, s.day));
+  const effective = global ?? s.operations;
+  return {
+    provider,
+    localOperations: s.operations,
+    globalOperations: global,
+    dailyLimit: limit.dailyOperations,
+    globalUsedPct: limit.dailyOperations ? Math.round((effective / limit.dailyOperations) * 100) : null,
+    shared: global !== null,
+    businessDay: s.day,
+  };
 }

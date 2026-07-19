@@ -103,7 +103,8 @@ const KEYWORD_CATEGORY: { re: RegExp; category: RecCategory }[] = [
   { re: /robots|sitemap|canonical|broken link|404|redirect/i, category: "Technical" },
 ];
 
-function inferCategory(r: RawRec): RecCategory {
+/** Exported for unit testing — pure function, no I/O. */
+export function inferCategory(r: RawRec): RecCategory {
   for (const k of KEYWORD_CATEGORY) {
     if (k.re.test(r.title) || k.re.test(r.detail)) return k.category;
   }
@@ -114,7 +115,8 @@ function inferCategory(r: RawRec): RecCategory {
 // Critical is NEVER inferred from tone. Only these proven conditions escalate.
 const CRITICAL_SIGNALS = /unreachable|is down|not reachable|returned http 5|ssl (expired|invalid)|certificate expired/i;
 
-function resolvePriority(r: RawRec): RecPriority {
+/** Exported for unit testing — pure function, no I/O. */
+export function resolvePriority(r: RawRec): RecPriority {
   if (r.critical || CRITICAL_SIGNALS.test(r.title) || CRITICAL_SIGNALS.test(r.detail)) return "critical";
   return r.priority;
 }
@@ -127,7 +129,8 @@ function resolvePriority(r: RawRec): RecPriority {
 // conversions" collapse, while unrelated findings never do.
 const STOP_WORDS = new Set(["the", "a", "an", "is", "are", "to", "of", "for", "on", "in", "with", "and", "or", "your", "you", "no", "not", "s"]);
 
-function normaliseKey(title: string): string {
+/** Exported for unit testing — pure function, no I/O. */
+export function normaliseKey(title: string): string {
   return title
     .toLowerCase()
     .replace(/[^a-z\s]/g, " ")
@@ -138,7 +141,8 @@ function normaliseKey(title: string): string {
     .trim();
 }
 
-function fingerprint(key: string, category: RecCategory): string {
+/** Exported for unit testing — pure function, no I/O. */
+export function fingerprint(key: string, category: RecCategory): string {
   return createHash("sha1").update(`${category}::${key}`).digest("hex").slice(0, 16);
 }
 

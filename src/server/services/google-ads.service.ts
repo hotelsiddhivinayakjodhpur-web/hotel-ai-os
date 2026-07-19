@@ -218,7 +218,8 @@ function presetDays(preset: AdsDatePreset): number {
  * from real metrics. No fabricated thresholds beyond well-known Google Ads norms.
  * Benchmarks (account CPA) are passed in so scoring is relative to this account.
  */
-function scoreCampaignHealth(
+/** Exported for unit testing — pure function, no I/O. */
+export function scoreCampaignHealth(
   r: Omit<AdsCampaignRow, "health">,
   accountCpa: number | null,
 ): AdsCampaignHealth {
@@ -260,7 +261,8 @@ function scoreCampaignHealth(
 }
 
 /** Impression-weighted average over rows that report a value (null if none do). */
-function impressionWeightedAvg<T extends { impressions: number }>(rows: T[], pick: (r: T) => number | null): number | null {
+/** Exported for unit testing — pure function, no I/O. */
+export function impressionWeightedAvg<T extends { impressions: number }>(rows: T[], pick: (r: T) => number | null): number | null {
   let num = 0;
   let den = 0;
   for (const r of rows) {
@@ -281,7 +283,8 @@ function impressionWeightedAvg<T extends { impressions: number }>(rows: T[], pic
  * clicks denominators, which the Google Ads API does not expose — so click-weighting
  * is the closest correct aggregation available.
  */
-function clickWeightedAvg<T extends { clicks: number }>(rows: T[], pick: (r: T) => number | null): number | null {
+/** Exported for unit testing — pure function, no I/O. */
+export function clickWeightedAvg<T extends { clicks: number }>(rows: T[], pick: (r: T) => number | null): number | null {
   let num = 0;
   let den = 0;
   for (const r of rows) {
@@ -1102,7 +1105,8 @@ function priorWindowClause(preset: AdsDatePreset): string | null {
 }
 
 /** Per-keyword health (0-100) + evidence, from real metrics vs account CPA. */
-function scoreKeyword(k: AdsKeywordRow, accountCpa: number | null): { score: number; perf: KeywordPerf; issues: string[] } {
+/** Exported for unit testing — pure function, no I/O. */
+export function scoreKeyword(k: AdsKeywordRow, accountCpa: number | null): { score: number; perf: KeywordPerf; issues: string[] } {
   const issues: string[] = [];
   let score = 100;
   const paused = k.status !== "ENABLED";

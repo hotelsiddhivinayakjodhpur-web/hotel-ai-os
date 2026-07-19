@@ -1,3 +1,4 @@
+import { governed } from "@/server/integrations/api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { withRetry } from "@/lib/retry";
@@ -66,13 +67,15 @@ function header(msg: GmailMessage, name: string): string | undefined {
 
 /** GET helper with retry on transient failures. */
 async function gmailGet(url: string, token: string): Promise<Response> {
-  return withRetry(
+  // Shared API Governance — same policy as every other integration.
+  return governed(
+    "gmail",
     async () => {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (res.status === 429 || res.status >= 500) throw Object.assign(new Error(`Gmail ${res.status}`), { status: res.status });
       return res;
     },
-    { label: "gmail-get", retries: 3 },
+    { label: "gmail:get", maxAttempts: 3 },
   );
 }
 
@@ -98,7 +101,7 @@ export async function syncGmailReports(
 
   // Fatal-path failures (auth/list) are recorded as a FAILED sync + alert.
   try {
-    const token = await withRetry(() => getGmailAccessToken(), { label: "gmail-token", retries: 3 });
+    const token = await governed("gmail", () => getGmailAccessToken(), { label: "gmail:token" });
     const sender = env.GMAIL_REPORT_SENDER;
     const q = `from:${sender} is:unread (subject:"Night Audit" OR subject:"Daily Intelligence")`;
 

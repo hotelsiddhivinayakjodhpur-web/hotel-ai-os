@@ -141,6 +141,43 @@ export async function adsSearch(query: string, customerId?: string): Promise<Ads
   )) as AdsSearchRow[];
 }
 
+/**
+ * The Google Ads ACCOUNT timezone, detected from the API.
+ *
+ * Reporting rows are bucketed by the account's own timezone, so every date
+ * window must be built on that clock. Rather than trusting an operator to set an
+ * env var correctly, we read `customer.time_zone` directly and cache it for the
+ * process. GOOGLE_ADS_TIMEZONE stays available as a manual override, and the
+ * hotel timezone is the final fallback when the account cannot be reached.
+ */
+let accountTimeZoneCache: { value: string; at: number } | null = null;
+const TZ_TTL_MS = 6 * 60 * 60 * 1000; // an account timezone effectively never changes
+
+export async function getAdsAccountTimeZone(): Promise<string> {
+  const override = process.env.GOOGLE_ADS_TIMEZONE;
+  if (override) return override;
+  if (accountTimeZoneCache && Date.now() - accountTimeZoneCache.at < TZ_TTL_MS) return accountTimeZoneCache.value;
+  if (!adsConfigured()) return process.env.HOTEL_TIMEZONE || "Asia/Kolkata";
+
+  try {
+    const rows = await adsSearch("SELECT customer.time_zone FROM customer LIMIT 1");
+    const tz = (rows[0]?.customer as { timeZone?: string } | undefined)?.timeZone;
+    if (tz) {
+      accountTimeZoneCache = { value: tz, at: Date.now() };
+      log.info("ads_timezone_detected", { timeZone: tz });
+      return tz;
+    }
+  } catch (e) {
+    log.warn("ads_timezone_detect_failed", { reason: e instanceof Error ? e.message : String(e) });
+  }
+  return process.env.HOTEL_TIMEZONE || "Asia/Kolkata";
+}
+
+/** Last known account timezone without triggering a fetch (diagnostics/UI). */
+export function knownAdsTimeZone(): string | null {
+  return process.env.GOOGLE_ADS_TIMEZONE ?? accountTimeZoneCache?.value ?? null;
+}
+
 /** GAQL date-range clause for the app's supported presets. */
 export type AdsDatePreset = "TODAY" | "YESTERDAY" | "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | "LAST_MONTH";
 export function duringClause(preset: AdsDatePreset): string {

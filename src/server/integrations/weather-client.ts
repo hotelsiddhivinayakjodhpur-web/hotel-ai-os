@@ -1,3 +1,4 @@
+import { governed } from "./api-governance";
 import { logger } from "@/lib/logger";
 
 /**
@@ -27,7 +28,7 @@ export async function getJodhpurWeather(): Promise<{ data: JodhpurWeather | null
       timezone: "Asia/Kolkata",
       forecast_days: "1",
     });
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?${qs}`, { next: { revalidate: 1800 } });
+    const res = await governed("weather", () => fetch(`https://api.open-meteo.com/v1/forecast?${qs}`, { next: { revalidate: 1800 } }), { label: "open-meteo:forecast" });
     if (!res.ok) {
       log.warn("weather_failed", { status: res.status });
       return { data: null, reason: `Weather service returned ${res.status}.` };

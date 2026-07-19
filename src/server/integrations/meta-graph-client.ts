@@ -1,6 +1,6 @@
+import { governed } from "./api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { withRetry } from "@/lib/retry";
 
 /**
  * Official Meta Graph API client — Facebook Pages + Instagram Business, read-only.
@@ -79,7 +79,8 @@ async function rawGet(path: string, params: Record<string, string>, token: strin
 /** Graph GET with the long-lived user/system token (Instagram + token utils). */
 export async function graphGet<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   if (!env.META_ACCESS_TOKEN) throw new Error("META_ACCESS_TOKEN is not set.");
-  return (await withRetry(() => rawGet(path, params, env.META_ACCESS_TOKEN!, path.split("/")[0] ?? path), {
+  // Shared API Governance (Meta app-level rate limits are strict).
+  return (await governed("meta", () => rawGet(path, params, env.META_ACCESS_TOKEN!, path.split("/")[0] ?? path), {
     label: `meta-${path.split("/")[0]}`,
     shouldRetry: retryable,
   })) as T;
@@ -101,7 +102,7 @@ async function getPageToken(): Promise<string> {
 /** Graph GET authenticated with the PAGE token (Facebook Page + insights + posts). */
 export async function graphPageGet<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const token = await getPageToken();
-  return (await withRetry(() => rawGet(path, params, token, `page:${path.split("/")[1] ?? "node"}`), {
+  return (await governed("instagram", () => rawGet(path, params, token, `page:${path.split("/")[1] ?? "node"}`), {
     label: `meta-page-${path.split("/")[1] ?? "node"}`,
     shouldRetry: retryable,
   })) as T;

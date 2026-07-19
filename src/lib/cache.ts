@@ -211,3 +211,33 @@ export const TTL = {
   medium: 300_000, // 5 min — default for Google report data
   long: 900_000, // 15 min
 } as const;
+
+// ── Shared atomic counters (for the global quota ledger) ───────────────────
+//
+// `cached()` stores values; a fleet-wide quota tally needs ATOMIC increment so
+// concurrent lambdas cannot lose writes. Redis INCRBY gives exactly that. These
+// are additive helpers — the existing cache API is untouched.
+
+/**
+ * Atomically add to a shared counter and return the new total.
+ * Returns null when no distributed cache is configured (caller falls back to
+ * local accounting rather than reporting a wrong number).
+ */
+export async function incrementCounter(key: string, by = 1, ttlMs = 26 * 60 * 60 * 1000): Promise<number | null> {
+  if (!isDistributed()) return null;
+  const raw = await remoteFetch(`/incrby/${encodeURIComponent(nsKey(key))}/${by}`, { method: "POST" });
+  if (raw === null || raw === undefined) return null;
+  // Refresh the expiry so the counter dies with its business day.
+  void remoteFetch(`/expire/${encodeURIComponent(nsKey(key))}/${Math.round(ttlMs / 1000)}`, { method: "POST" });
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Read a shared counter without modifying it. null = unavailable. */
+export async function readCounter(key: string): Promise<number | null> {
+  if (!isDistributed()) return null;
+  const raw = await remoteFetch(`/get/${encodeURIComponent(nsKey(key))}`);
+  if (raw === null || raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}

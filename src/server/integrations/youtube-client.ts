@@ -1,6 +1,7 @@
+import { retryableHttp } from "@/lib/retry";
+import { governed } from "./api-governance";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { withRetry, retryableHttp } from "@/lib/retry";
 
 /**
  * Official YouTube client — OAuth only (no API keys on authenticated requests).
@@ -106,7 +107,8 @@ const retryable = (err: unknown) => (err instanceof YouTubeApiError ? err.status
 /** GET a YouTube Data API v3 resource (channels, playlists, playlistItems, videos, search). */
 export async function ytData<T>(resource: string, params: Record<string, string>): Promise<T> {
   const qs = new URLSearchParams(params).toString();
-  return (await withRetry(() => authorizedGet(`${DATA_BASE}/${resource}?${qs}`, `data:${resource}`), {
+  // Shared API Governance (YouTube Data API is quota-unit metered).
+  return (await governed("youtube", () => authorizedGet(`${DATA_BASE}/${resource}?${qs}`, `data:${resource}`), {
     label: `youtube-data-${resource}`,
     shouldRetry: retryable,
   })) as T;
@@ -115,7 +117,7 @@ export async function ytData<T>(resource: string, params: Record<string, string>
 /** GET a YouTube Analytics API v2 report (channel==MINE). */
 export async function ytAnalyticsReport<T>(params: Record<string, string>): Promise<T> {
   const qs = new URLSearchParams({ ids: "channel==MINE", ...params }).toString();
-  return (await withRetry(() => authorizedGet(`${ANALYTICS_BASE}?${qs}`, "analytics:reports"), {
+  return (await governed("youtube", () => authorizedGet(`${ANALYTICS_BASE}?${qs}`, "analytics:reports"), {
     label: "youtube-analytics-reports",
     shouldRetry: retryable,
   })) as T;
